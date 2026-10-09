@@ -28,7 +28,6 @@ webble = [
 
 [dependencies]
 async-trait = { workspace = true }
-kohaku-railgun-ledger = { workspace = true }
 hex = { workspace = true }
 railgun = { workspace = true }
 ruint = { workspace = true }

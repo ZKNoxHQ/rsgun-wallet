@@ -22,7 +22,6 @@ pedantic = { level = "warn", priority = -1 }
 crypto = { package = "kohaku-crypto", path = "../kohaku-rs/crates/crypto" }
 eip-1193-provider = { package = "kohaku-eip-1193", path = "../kohaku-rs/crates/eip-1193" }
 kohaku-kv-store = { path = "../kohaku-rs/crates/kv-store" }
-kohaku-railgun-ledger = { path = "../kohaku-rs/crates/railgun-ledger" }
 railgun = { package = "kohaku-railgun", path = "../kohaku-rs/crates/railgun" }
 userop-kit = { package = "kohaku-userop-kit", path = "../kohaku-rs/crates/userop-kit" }
 

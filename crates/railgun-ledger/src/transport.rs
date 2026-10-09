@@ -1,10 +1,49 @@
-//! Ledger transports for the Railgun signer of the Kohaku SDK.
-//!
-//! The SDK (`kohaku-railgun-ledger`) defines [`Exchange`] and is transport-agnostic; the
-//! implementations live here: USB HID (`usb`), Bluetooth LE (`ble`), and in the browser WebUSB
-//! (`webusb`) and Web Bluetooth (`webble`).
+//! Transport abstraction: anything that can exchange APDUs with a Ledger device, and the
+//! transports themselves.
 
-pub use kohaku_railgun_ledger::transport::{Apdu, ApduResponse, Exchange, TransportError};
+use railgun::MaybeSend;
+use thiserror::Error;
+
+/// A raw APDU command, transport-agnostic.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Apdu {
+    pub cla: u8,
+    pub ins: u8,
+    pub p1: u8,
+    pub p2: u8,
+    pub data: Vec<u8>,
+}
+
+/// A raw APDU response: payload plus the trailing status word.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ApduResponse {
+    pub data: Vec<u8>,
+    pub status: u16,
+}
+
+#[derive(Debug, Error)]
+#[error("Ledger transport error: {0}")]
+pub struct TransportError(pub String);
+
+/// A duplex channel to a Ledger device.
+///
+/// The only integration point a transport has to provide; the protocol and signer layers are
+/// independent of it. Implementations below: USB HID (`usb`), Bluetooth LE (`ble`), WebUSB
+/// (`webusb`) and Web Bluetooth (`webble`).
+#[cfg_attr(native, async_trait::async_trait)]
+#[cfg_attr(wasm, async_trait::async_trait(?Send))]
+pub trait Exchange: MaybeSend {
+    async fn exchange(&self, apdu: &Apdu) -> Result<ApduResponse, TransportError>;
+
+    /// Re-establish the channel after it went stale. A Ledger re-enumerates on USB whenever
+    /// an app is opened or closed (and on lock), which invalidates any open handle; callers
+    /// retry a failed exchange once after a successful reconnect.
+    async fn reconnect(&self) -> Result<(), TransportError> {
+        Err(TransportError(
+            "transport does not support reconnection".into(),
+        ))
+    }
+}
 
 /// USB HID transport over `coins-ledger`.
 #[cfg(all(native, feature = "usb"))]

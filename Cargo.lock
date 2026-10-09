@@ -4583,19 +4583,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "kohaku-railgun-ledger"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "cfg_aliases",
- "hex",
- "kohaku-railgun",
- "ruint",
- "thiserror 2.0.21",
- "tracing",
-]
-
-[[package]]
 name = "kohaku-userop-kit"
 version = "0.1.0"
 dependencies = [
@@ -6394,7 +6381,6 @@ dependencies = [
  "js-sys",
  "kohaku-crypto",
  "kohaku-railgun",
- "kohaku-railgun-ledger",
  "num-bigint",
  "ruint",
  "thiserror 2.0.21",
