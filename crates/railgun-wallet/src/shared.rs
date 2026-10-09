@@ -209,9 +209,11 @@ impl<S: Subscriber> Layer<S> for FrontLogLayer {
     fn on_event(&self, event: &Event<'_>, _ctx: Context<'_, S>) {
         let meta = event.metadata();
         let target = meta.target();
-        // Only our own crates: dependency chatter (hyper, reqwest, libp2p...) stays on stderr.
+        // Only our own crates and the Kohaku SDK (crate names `kohaku_railgun`,
+        // `kohaku_userop_kit`): dependency chatter (hyper, reqwest, libp2p...) stays on stderr.
         if !(target.starts_with("railgun")
-            || target.starts_with("userop_kit")
+            || target.starts_with("kohaku_railgun")
+            || target.starts_with("kohaku_userop_kit")
             || target.starts_with("waku_light"))
         {
             return;

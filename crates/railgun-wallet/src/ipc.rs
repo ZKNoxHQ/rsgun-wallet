@@ -280,7 +280,7 @@ pub fn boot(data_dir: std::path::PathBuf, io: tokio::runtime::Handle) -> anyhow:
 
     let shared = Arc::new(crate::shared::Shared::default());
     let filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| EnvFilter::new("info,railgun=info,railgun_wallet=info"));
+        .unwrap_or_else(|_| EnvFilter::new("info,kohaku_railgun=info,railgun_wallet=info"));
     let _ = tracing_subscriber::registry()
         .with(filter)
         .with(tracing_subscriber::fmt::layer())
