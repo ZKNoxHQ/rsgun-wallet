@@ -1,0 +1,4 @@
+{ "name": "railgun-wallet-waku-bridge", "private": true, "version": "0.1.0", "type": "module",
+  "scripts": { "build": "esbuild bridge.js --bundle --format=iife --platform=browser --target=es2022 --minify --legal-comments=none --outfile=../static/waku-bundle.js" },
+  "dependencies": { "@waku/sdk": "0.0.36" },
+  "devDependencies": { "esbuild": "0.25.10" } }

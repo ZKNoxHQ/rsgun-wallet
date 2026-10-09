@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>waku-light in the browser</title>
+<style>
+  body { font: 14px/1.4 system-ui, sans-serif; margin: 2rem; max-width: 70rem; color: #222; }
+  h1 { font-size: 1.3rem; }
+  .row { display: flex; gap: .6rem; align-items: center; margin-bottom: 1rem; }
+  #status { font-family: ui-monospace, monospace; background: #f4f4f4; padding: .6rem; white-space: pre-wrap; }
+  table { border-collapse: collapse; width: 100%; margin-top: 1rem; }
+  th, td { text-align: left; padding: .3rem .5rem; border-bottom: 1px solid #ddd; font-size: 13px; }
+  td.mono { font-family: ui-monospace, monospace; }
+  .muted { color: #777; }
+</style>
+</head>
+<body>
+<h1>waku-light (Rust, wasm32) on the Railgun Waku fleet</h1>
+<p class="muted">Light node running in this page over the browser's WebSocket: filter subscription to the fee
+announcements of the chosen chain. The echo test publishes three small messages on a content topic of its own
+(no broadcaster listens to it) and waits for them to come back through the fleet. Logs are in the browser console.
+Same node hosted in a Web Worker: <a href="worker.html">worker.html</a>.</p>
+<div class="row">
+  <select id="chain">
+    <option value="11155111">Sepolia</option>
+    <option value="1">Ethereum</option>
+    <option value="42161">Arbitrum One</option>
+    <option value="137">Polygon</option>
+    <option value="56">BNB Chain</option>
+  </select>
+  <button id="start">Start</button>
+  <button id="stop" disabled>Stop</button>
+  <button id="echo" disabled>Echo test</button>
+</div>
+<div id="status">stopped</div>
+<div id="echolog" style="font-family: ui-monospace, monospace; white-space: pre-wrap; margin-top: .6rem;"></div>
+<table>
+  <thead><tr><th>Broadcaster</th><th>Identifier</th><th>Version</th><th>Wallets</th><th>Reliability</th><th>Tokens</th><th>Offer expires</th><th>Announcements</th><th>Last seen</th></tr></thead>
+  <tbody id="rows"></tbody>
+</table>
+<script type="module">
+import init, { WebNode } from "./pkg/web_fleet.js";
+
+const $ = (id) => document.getElementById(id);
+let node = null, started = 0, firstAt = null, total = 0;
+const seen = new Map();
+const ECHO = "/zknox-waku-light/1/echo/json";
+const pending = new Map();
+const echoLog = [];
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+function logEcho(line) { echoLog.push(line); $("echolog").textContent = echoLog.join("\n"); }
+
+function decodeFee(bytes) {
+  try {
+    const outer = JSON.parse(new TextDecoder().decode(bytes));
+    const hex = outer.data.startsWith("0x") ? outer.data.slice(2) : outer.data;
+    const raw = new Uint8Array(hex.match(/../g).map((h) => parseInt(h, 16)));
+    return JSON.parse(new TextDecoder().decode(raw));
+  } catch { return null; }
+}
+
+function render() {
+  const rows = [...seen.values()].sort((a, b) => b.last - a.last);
+  $("rows").replaceChildren(...rows.map((r) => {
+    const tr = document.createElement("tr");
+    const cells = [
+      [r.address.slice(0, 14) + "…" + r.address.slice(-4), "mono"],
+      [r.identifier || "-"], [r.version], [String(r.wallets)], [String(r.reliability)],
+      [String(r.tokens)], [Math.max(0, Math.round((r.expires - Date.now()) / 1000)) + " s"],
+      [String(r.count)], [Math.round((Date.now() - r.last) / 1000) + " s ago"],
+    ];
+    for (const [text, cls] of cells) { const td = document.createElement("td"); td.textContent = text; if (cls) td.className = cls; tr.append(td); }
+    return tr;
+  }));
+}
+
+function poll() {
+  if (!node) return;
+  for (const m of node.drain()) {
+    if (m.contentTopic === ECHO) {
+      const text = new TextDecoder().decode(m.payload);
+      const p = pending.get(text);
+      if (p) { logEcho(`[${p.round}] echo received after ${Date.now() - p.sentAt} ms`); pending.delete(text); }
+      continue;
+    }
+    total += 1;
+    if (firstAt === null) firstAt = (Date.now() - started) / 1000;
+    const d = decodeFee(m.payload);
+    if (!d || !d.railgunAddress) continue;
+    const prev = seen.get(d.railgunAddress);
+    seen.set(d.railgunAddress, {
+      address: d.railgunAddress, identifier: d.identifier, version: d.version,
+      wallets: d.availableWallets, reliability: d.reliability,
+      tokens: Object.keys(d.fees || {}).length, expires: d.feeExpiration,
+      count: (prev ? prev.count : 0) + 1, last: Date.now(),
+    });
+  }
+  const s = node.status();
+  $("status").textContent =
+    `peer ${node.peerId()}\ntopic ${node.topic()}\n` +
+    `connected ${s.connectedPeers}, service nodes ${s.servicePeers}, filter subscriptions ${s.filterSubscriptions}\n` +
+    `${total} message(s)` + (firstAt !== null ? `, first after ${firstAt.toFixed(1)} s` : "") +
+    (s.lastError ? `\nlast error: ${s.lastError}` : "");
+  render();
+}
+
+await init();
+$("start").onclick = () => {
+  if (node) node.free();
+  seen.clear(); total = 0; firstAt = null; started = Date.now();
+  node = new WebNode(Number($("chain").value));
+  $("stop").disabled = false;
+  $("echo").disabled = false;
+};
+$("echo").onclick = async () => {
+  if (!node) return;
+  $("echo").disabled = true;
+  echoLog.length = 0; pending.clear();
+  node.subscribe(ECHO);
+  logEcho(`subscribing to ${ECHO}, publishing in 6 s`);
+  await sleep(6000);
+  for (let round = 1; round <= 3 && node; round++) {
+    const text = JSON.stringify({ echo: `${node.peerId().slice(-8)}-${round}-${Date.now()}` });
+    pending.set(text, { round, sentAt: Date.now() });
+    try {
+      const r = await node.publish(ECHO, new TextEncoder().encode(text));
+      logEcho(`[${round}] light push accepted by ${r.accepted} peer(s): ${r.via.join(", ")}` +
+        (r.failures.length ? `; refused: ${r.failures.join("; ")}` : ""));
+    } catch (e) {
+      pending.delete(text);
+      logEcho(`[${round}] light push failed: ${e}`);
+    }
+    await sleep(8000);
+  }
+  for (const p of pending.values()) logEcho(`[${p.round}] no echo within 8 s`);
+  pending.clear();
+  if (node) $("echo").disabled = false;
+};
+$("stop").onclick = () => {
+  if (node) { node.free(); node = null; }
+  $("stop").disabled = true;
+  $("echo").disabled = true;
+  $("status").textContent = "stopped";
+};
+setInterval(poll, 1000);
+</script>
+</body>
+</html>

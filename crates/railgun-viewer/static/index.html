@@ -1,0 +1,770 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Dr Rail</title>
+<meta name="robots" content="noindex"/>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@10..48,400;10..48,600;10..48,700;10..48,800&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap');
+  :root{
+    --bleu:#000091; --rouge:#E1000F; --blanc:#fff; --creme:#F5F5FE; --papier:#FBFBFF;
+    --encre:#16161D; --gris:#6A6AF4; --or:#FFC400; --vert:#0F6E56; --ambre:#B8860B;
+    --ligne:rgba(0,0,145,.1); --ligne2:rgba(0,0,145,.18);
+    --ombre:0 1px 0 rgba(0,0,145,.05),0 14px 40px -18px rgba(0,0,145,.30);
+    --rad:18px;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:'Inter',system-ui,sans-serif;color:var(--encre);line-height:1.5;-webkit-font-smoothing:antialiased;min-height:100vh;
+    background:radial-gradient(1200px 600px at 85% -10%,rgba(225,0,15,.06),transparent 60%),radial-gradient(1000px 620px at -5% 108%,rgba(0,0,145,.07),transparent 55%),var(--creme)}
+  .wrap{max-width:1500px;margin:0 auto;padding:20px 18px 60px}
+  header{display:flex;align-items:center;gap:14px;margin-bottom:18px}
+  .marque{display:flex;align-items:center;gap:12px;min-width:0}
+  .cocarde-txt{width:40px;height:40px;flex:none;border-radius:50%;background:var(--bleu);color:#fff;display:flex;align-items:center;justify-content:center;font:800 18px 'Bricolage Grotesque',sans-serif;box-shadow:0 4px 14px -4px rgba(0,0,145,.5),0 0 0 2px var(--blanc)}
+  .titre{font-family:'Bricolage Grotesque',sans-serif;font-weight:800;font-size:1.25rem;letter-spacing:-.02em}
+  .sous{font-size:.8rem;color:#55557a}
+  .sp{flex:1}
+  .ver{font-size:.68rem;color:#8a8aa5;font-family:'JetBrains Mono',monospace}
+  .carte{background:var(--papier);border:1px solid var(--ligne);border-radius:var(--rad);box-shadow:var(--ombre)}
+  .sensitive{filter:blur(6px);cursor:pointer;transition:filter .15s;user-select:none}
+  .sensitive.revealed{filter:none;user-select:text}
+  .vw-form{padding:16px 18px;margin-bottom:14px}
+  .vw-grid{display:grid;grid-template-columns:150px 1fr 220px 1fr;gap:10px;margin-bottom:10px}
+  @media(max-width:1000px){.vw-grid{grid-template-columns:1fr 1fr}}
+  @media(max-width:600px){.vw-grid{grid-template-columns:1fr}}
+  .vw-form label{display:flex;flex-direction:column;gap:4px;font-size:.72rem;color:#55557a;font-weight:600;letter-spacing:.02em}
+  .vw-form input,.vw-form select{border:1px solid var(--ligne2);border-radius:9px;padding:8px 10px;font:inherit;font-size:.82rem;background:var(--blanc);color:var(--encre);font-family:'JetBrains Mono',monospace}
+  .vw-form input:disabled,.vw-form select:disabled{opacity:.6}
+  .vw-key{margin-bottom:10px}
+  .vw-actions{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+  .vw-actions button,.vw-mn button,.vw-loghead button{border:none;border-radius:9px;padding:9px 14px;font:inherit;font-size:.82rem;font-weight:600;cursor:pointer;background:var(--bleu);color:#fff;transition:.15s}
+  .vw-actions button.ghost,.vw-mn button.ghost,.vw-loghead button.ghost{background:var(--creme);color:var(--bleu);border:1px solid var(--ligne2)}
+  .vw-actions button:disabled{opacity:.5;cursor:default}
+  .vw-details{font-size:.78rem}
+  .vw-details summary{cursor:pointer;color:var(--bleu);font-weight:600;padding:8px 4px}
+  .vw-mn{display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:6px 0 4px}
+  .vw-mn input{flex:1;min-width:280px;border:1px solid var(--ligne2);border-radius:9px;padding:8px 10px;font:inherit;font-size:.82rem;font-family:'JetBrains Mono',monospace}
+  .vw-note{flex-basis:100%;font-size:.72rem;color:#7a7a99}
+  .vw-strip{display:flex;flex-wrap:wrap;gap:8px 18px;margin-top:12px;font-size:.78rem;color:#55557a;align-items:center}
+  .vw-strip code{font-family:'JetBrains Mono',monospace;font-size:.72rem;background:var(--creme);border-radius:5px;padding:1px 6px;word-break:break-all}
+  .vw-status{font-family:'JetBrains Mono',monospace;font-size:.7rem;color:#8a8aa5;flex-basis:100%}
+  .vw-all{font:11px 'JetBrains Mono',monospace;color:#3a3a52;white-space:pre-wrap;margin-top:6px}
+  .vw-all:empty{display:none}
+  .vw-log{margin-top:14px;padding:12px 16px}
+  .vw-loghead{display:flex;justify-content:space-between;align-items:center;font-size:.72rem;letter-spacing:.1em;text-transform:uppercase;color:#55557a;font-weight:600;margin-bottom:6px}
+  .vw-loghead button{padding:4px 10px;font-size:.72rem}
+  #log{font:11px 'JetBrains Mono',monospace;white-space:pre-wrap;max-height:220px;overflow:auto;color:#3a3a52}
+
+  /* ---------------- Onglets (v1.9.0) ---------------- */
+  .onglets{display:none;gap:6px;margin:-6px 0 16px;border-bottom:1px solid var(--ligne2);padding-bottom:0}
+  .onglets.show{display:flex}
+  .onglets button{border:none;background:transparent;font:inherit;font-weight:600;font-size:.88rem;color:#55557a;padding:10px 14px;cursor:pointer;
+    border-bottom:3px solid transparent;margin-bottom:-1px;display:inline-flex;align-items:center;gap:8px;transition:.15s}
+  .onglets button svg{width:16px;height:16px}
+  .onglets button:hover{color:var(--bleu)}
+  .onglets button.on{color:var(--bleu);border-bottom-color:var(--bleu)}
+  .onglets .sp{flex:1}
+  .onglets .ver{font-size:.68rem;color:#8a8aa5;align-self:center;font-family:'JetBrains Mono',monospace}
+
+  /* ---------------- Arbre des notes ---------------- */
+  #notes{display:none}
+  #notes.show{display:block}
+  .nx-wrap{display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:14px}
+  @media(max-width:900px){.nx-wrap{grid-template-columns:1fr}}
+  .nx-bar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:12px 14px;margin-bottom:12px}
+  .nx-bar select,.nx-bar input[type=text]{border:1px solid var(--ligne2);border-radius:9px;padding:7px 10px;font:inherit;font-size:.8rem;background:var(--blanc);color:var(--encre)}
+  .nx-bar input[type=text]{min-width:190px;font-family:'JetBrains Mono',monospace}
+  .nx-bar label.ck{display:inline-flex;align-items:center;gap:5px;font-size:.78rem;color:#55557a;cursor:pointer;user-select:none}
+  .nx-bar label.ck input{accent-color:var(--bleu)}
+  .nx-bar .sep{width:1px;height:22px;background:var(--ligne2);margin:0 2px}
+  .nx-bar button{border:none;border-radius:9px;padding:8px 12px;font:inherit;font-size:.8rem;font-weight:600;cursor:pointer;background:var(--bleu);color:#fff;transition:.15s}
+  .nx-bar button.ghost{background:var(--creme);color:var(--bleu);border:1px solid var(--ligne2)}
+  .nx-bar button:hover{filter:brightness(1.08)}
+  .nx-status{font-size:.74rem;color:#7a7a99;margin-left:auto;font-family:'JetBrains Mono',monospace;max-width:100%}
+  .nx-status.err{color:var(--rouge)}
+  .nx-canvas{height:min(72vh,760px);min-height:380px;position:relative;overflow:hidden;background:
+    radial-gradient(circle at 1px 1px,rgba(0,0,145,.09) 1px,transparent 1.5px) 0 0/22px 22px,var(--papier);cursor:grab;border-radius:var(--rad)}
+  .nx-canvas:active{cursor:grabbing}
+  .nx-canvas svg{display:block;width:100%;height:100%}
+  .nx-canvas .edge{fill:none;stroke:#9a9ab5;opacity:.85;transition:opacity .15s}
+  .nx-canvas .edge.ghost{stroke-dasharray:3 3}
+  .nx-canvas .edge.taint{}
+  .nx-canvas .lab{font:10px 'JetBrains Mono',ui-monospace,monospace;fill:#3a3a52;text-anchor:middle;pointer-events:none}
+  .nx-canvas .lab.tx{fill:var(--bleu)}
+  .nx-canvas .lab.ghost{fill:#8a8aa5}
+  .nx-canvas .glyph{font:700 10px 'Inter',system-ui,sans-serif;text-anchor:middle;pointer-events:none}
+  .nx-canvas .bandlab{font:600 11px 'Inter',system-ui,sans-serif;fill:#55557a}
+  .nx-canvas g.nd{cursor:pointer;outline:none}
+  .nx-canvas g.nd .core{transition:filter .15s}
+  .nx-canvas g.nd:hover .core,.nx-canvas g.nd:focus-visible .core{filter:drop-shadow(0 0 6px rgba(0,0,145,.55))}
+  .nx-canvas g.nd.sel .core,.nx-canvas g.nd.sel polygon,.nx-canvas g.nd.sel rect{filter:drop-shadow(0 0 0 3px var(--or)) drop-shadow(0 0 8px rgba(255,196,0,.9))}
+  .nx-canvas svg.hl g.nd:not(.lit){opacity:.18}
+  .nx-canvas svg.hl path.edge:not(.lit){opacity:.08}
+  .nx-side{display:flex;flex-direction:column;gap:12px;min-width:0}
+  .nx-panel{padding:14px 16px;font-size:.8rem;max-height:min(46vh,480px);overflow:auto}
+  .nx-panel h3{font-family:'Bricolage Grotesque',sans-serif;font-weight:800;font-size:1rem;letter-spacing:-.01em;margin-bottom:8px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+  .nx-panel h3 code{font-size:.78rem;font-weight:500}
+  .nx-panel h4{font-size:.72rem;letter-spacing:.1em;text-transform:uppercase;color:#55557a;font-weight:600;margin-bottom:8px}
+  .nx-row{display:grid;grid-template-columns:118px 1fr;gap:8px;padding:5px 0;border-bottom:1px solid var(--ligne);align-items:start}
+  .nx-row:last-child{border-bottom:0}
+  .nx-k{color:#7a7a99;font-size:.72rem;padding-top:2px}
+  .nx-v{min-width:0;word-break:break-all}
+  .nx-v code,.nx-panel code{font-family:'JetBrains Mono',monospace;font-size:.72rem;background:var(--creme);border-radius:5px;padding:1px 5px}
+  .nx-v a{color:var(--bleu);font-weight:600}
+  .nx-dim{color:#8a8aa5;font-size:.7rem}
+  .nx-warn{color:var(--rouge);font-weight:600}
+  .nx-empty{color:#9a9ab5;font-size:.82rem;padding:10px 0}
+  .nx-sens{display:inline-block;position:relative}
+  .poi-chip{display:inline-block;font-size:.66rem;font-weight:700;letter-spacing:.03em;padding:2px 7px;border-radius:999px;background:#eee;color:#666;margin:1px 2px 1px 0;font-family:'JetBrains Mono',monospace}
+  .poi-chip.Valid{background:rgba(15,110,86,.13);color:var(--vert)}
+  .poi-chip.ProofSubmitted{background:rgba(184,134,11,.16);color:var(--ambre)}
+  .poi-chip.Missing{background:rgba(225,0,15,.1);color:var(--rouge)}
+  .poi-chip.ShieldBlocked{background:#16161D;color:#fff}
+  .bk{display:inline-block;font-size:.7rem;font-weight:700;padding:2px 8px;border-radius:999px;background:var(--creme);color:var(--bleu)}
+  .bk.Spendable{background:rgba(15,110,86,.13);color:var(--vert)}
+  .bk.Spent{background:#eee;color:#666}
+  .bk.ShieldBlocked{background:#16161D;color:#fff}
+  .bk.MissingInternalPOI,.bk.MissingExternalPOI{background:rgba(225,0,15,.1);color:var(--rouge)}
+  .bk.ShieldPending,.bk.ProofSubmitted{background:rgba(184,134,11,.16);color:var(--ambre)}
+  .nx-stats{display:flex;flex-wrap:wrap;gap:8px;padding:12px 14px;margin-bottom:12px}
+  .nx-stats .st{display:flex;flex-direction:column;background:var(--blanc);border:1px solid var(--ligne);border-radius:10px;padding:6px 10px;min-width:74px}
+  .nx-stats .st b{font-family:'Bricolage Grotesque',sans-serif;font-size:1.05rem;font-variant-numeric:tabular-nums;line-height:1.1}
+  .nx-stats .st span{font-size:.66rem;color:#7a7a99}
+  .nx-stats .st.tok b{color:var(--bleu)}
+  .nx-stats .st.high{border-color:rgba(225,0,15,.4);background:rgba(225,0,15,.05)}.nx-stats .st.high b{color:var(--rouge)}
+  .nx-stats .st.warn{border-color:rgba(184,134,11,.4);background:rgba(184,134,11,.06)}.nx-stats .st.warn b{color:var(--ambre)}
+  .an{display:flex;align-items:flex-start;gap:8px;padding:7px 6px;border-radius:9px;cursor:pointer;font-size:.76rem;border-bottom:1px solid var(--ligne)}
+  .an:hover{background:var(--creme)}
+  .an .an-msg{flex:1}
+  .an .an-n{font-size:.66rem;color:#8a8aa5;font-family:'JetBrains Mono',monospace;padding-top:2px}
+  .an-chip{font-size:.62rem;font-weight:700;padding:2px 6px;border-radius:6px;font-family:'JetBrains Mono',monospace;white-space:nowrap;flex:none}
+  .an-chip.high{background:rgba(225,0,15,.12);color:var(--rouge)}
+  .an-chip.warn{background:rgba(184,134,11,.16);color:var(--ambre)}
+  .an-chip.info{background:var(--creme);color:var(--bleu)}
+  .nx-legend{display:flex;flex-wrap:wrap;gap:10px 16px;padding:10px 14px;font-size:.72rem;color:#55557a}
+  .nx-legend span{display:inline-flex;align-items:center;gap:6px}
+  .nx-legend i{display:inline-block;width:12px;height:12px;border-radius:50%;border:2px solid #16161D;background:var(--bleu)}
+  .nx-legend i.ext{background:#fff;border:2px dashed var(--bleu)}
+  .nx-legend i.tx{border-radius:2px;transform:rotate(45deg);background:#fff;border:2px solid var(--bleu);width:10px;height:10px}
+  .nx-legend i.sh{border-radius:3px;background:var(--rouge);border-color:var(--rouge)}
+  .nx-legend i.un{border-radius:4px;width:18px;height:11px;background:#fff;border:2px solid var(--bleu)}
+  .nx-legend i.gh{background:#fff;border:2px dashed #9a9ab5}
+  .nx-legend i.pv{background:#fff;border:3px solid var(--vert)}
+  .nx-legend i.pp{background:#fff;border:3px solid var(--ambre)}
+  .nx-legend i.pm{background:#fff;border:3px solid var(--rouge)}
+  .nx-legend i.pb{background:#fff;border:3px solid #16161D}
+  .nx-legend i.tn{background:#fff;border:2px dashed var(--rouge)}
+  .view{display:none}.view.show{display:block}
+  .vw-opts{display:flex;gap:14px;align-items:center;flex-wrap:wrap;padding-top:4px}
+  .vw-opts .ck{display:inline-flex;align-items:center;gap:5px;font-size:.78rem;color:#55557a;font-weight:500;flex-direction:row}
+  .vw-opts select,.vw-opts input{padding:4px 6px;font-size:.78rem}
+  .vw-key{margin-bottom:10px;display:grid;gap:8px}
+  .badge{display:inline-block;min-width:18px;padding:1px 6px;border-radius:999px;background:var(--rouge);color:#fff;font-size:.66rem;font-weight:700;margin-left:4px}
+  .tbl-wrap{padding:6px 8px;overflow:auto;max-height:min(72vh,760px)}
+  .tbl{width:100%;border-collapse:collapse;font-size:.78rem}
+  .tbl th{position:sticky;top:0;background:var(--papier);text-align:left;font-size:.68rem;letter-spacing:.08em;text-transform:uppercase;color:#55557a;padding:8px 8px;border-bottom:1px solid var(--ligne2)}
+  .tbl td{padding:8px 8px;border-bottom:1px solid var(--ligne);vertical-align:top}
+  .tbl tr{cursor:pointer}.tbl tr:hover td{background:var(--creme)}.tbl tr.sel td{background:rgba(255,196,0,.14)}
+  .tbl .dim,.nx-panel .dim{color:#8a8aa5;font-size:.68rem}
+  .kind{display:inline-block;font-size:.7rem;font-weight:700;padding:2px 8px;border-radius:999px;background:var(--creme);color:var(--bleu)}
+  .kind.shield{background:rgba(225,0,15,.1);color:var(--rouge)}.kind.unshield{background:rgba(15,110,86,.13);color:var(--vert)}.kind.receive{background:rgba(184,134,11,.16);color:var(--ambre)}
+  .memo{font-family:'JetBrains Mono',monospace;font-size:.72rem;color:#3a3a52}
+  .memo-box{background:rgba(255,196,0,.14);border:1px solid rgba(255,196,0,.5);border-radius:10px;padding:8px 10px;margin-bottom:10px;font-family:'JetBrains Mono',monospace;font-size:.78rem;white-space:pre-wrap}
+  hr.sep{border:0;border-top:1px dashed var(--ligne2);margin:6px 0}
+  .poi-panel{max-height:none;margin-bottom:12px}
+  .poi-chip.Unknown{background:#eee;color:#888}
+  #notes .nx-bar #nxSync{display:none}
+  .nx-canvas .edge.in{stroke:#000091}.nx-canvas .edge.in-poi{stroke:#6A2DA8}.nx-canvas .edge.out{stroke:#0F6E56}.nx-canvas .edge.out-nopoi{stroke:#E1000F}
+  .nx-canvas .edge.taint{stroke-dasharray:5 3}
+  .arr{font-weight:800;font-size:1rem;color:#9a9ab5}.arr.in{color:#000091}.arr.in-poi{color:#6A2DA8}.arr.out{color:#0F6E56}.arr.out-nopoi{color:#E1000F}
+  .nx-legend .arr{font-size:1.1rem;line-height:1}
+  .dbg{font:10px 'JetBrains Mono',monospace;white-space:pre-wrap;word-break:break-all;max-height:260px;overflow:auto;background:var(--creme);border-radius:8px;padding:6px}
+  .net-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:12px}
+  .net-card{padding:14px 16px;border-left:5px solid #9a9ab5}.net-card.lv-ok{border-left-color:var(--vert)}.net-card.lv-warn{border-left-color:var(--ambre)}.net-card.lv-down{border-left-color:var(--rouge)}
+  .net-card h4{font-size:.72rem;letter-spacing:.1em;text-transform:uppercase;color:#55557a;font-weight:600;margin-bottom:6px}
+  .net-sum{font-size:.82rem;margin-bottom:8px}.net-sum .lv{font-size:.66rem;font-weight:700;text-transform:uppercase;padding:2px 6px;border-radius:6px;background:var(--creme);color:#55557a;margin-right:4px}
+  .lv-ok .net-sum .lv{background:rgba(15,110,86,.13);color:var(--vert)}.lv-warn .net-sum .lv{background:rgba(184,134,11,.16);color:var(--ambre)}.lv-down .net-sum .lv{background:rgba(225,0,15,.1);color:var(--rouge)}
+  .net-det{max-height:220px}
+  .dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:#9a9ab5;margin-left:6px;vertical-align:middle}.dot.lv-ok{background:var(--vert)}.dot.lv-warn{background:var(--ambre)}.dot.lv-down{background:var(--rouge)}
+  .marque .logo{width:100px;height:150px;border-radius:12px;object-fit:cover;box-shadow:0 4px 14px -4px rgba(0,0,145,.5),0 0 0 2px var(--blanc);flex:none}
+  .vw-key.gated{opacity:.45}.vw-key.gated input{background:#eee;cursor:not-allowed}
+  .vw-warnline{color:var(--rouge);font-weight:600}
+  .vw-derived{display:flex;flex-wrap:wrap;gap:8px;align-items:center;font-size:.76rem;color:#55557a}
+  .vw-derived code{font-family:'JetBrains Mono',monospace;font-size:.72rem;background:var(--creme);border-radius:5px;padding:2px 6px;word-break:break-all}
+.vw-key[hidden]{display:none}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="marque">
+      <img class="logo" src="data:image/webp;base64,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" alt="Dr Rail" width="100" height="150"/>
+      <div>
+        <div class="titre">Dr Rail</div>
+        <div class="sous">Read-only history and note lineage. Mnemonic or viewing key. Never sends anything.</div>
+      </div>
+    </div>
+    <span class="sp"></span>
+    <span class="ver" id="vwVer">railgun-viewer</span>
+  </header>
+
+  <div class="carte vw-form" id="vwForm">
+    <div class="vw-grid">
+      <label>Network
+        <select id="vwNet"><option value="11155111">Sepolia</option><option value="1">Ethereum mainnet</option><option value="56">BNB Chain</option><option value="137">Polygon</option><option value="42161">Arbitrum One</option></select>
+      </label>
+      <label>RPC (empty = public)
+        <input type="text" id="vwRpc" placeholder="https://sepolia.infura.io/v3/…" spellcheck="false"/>
+      </label>
+      <label>Key source
+        <select id="vwMode">
+          <option value="mnemonic">Mnemonic (derives both keys)</option>
+          <option value="viewing">Private viewing key only</option>
+        </select>
+      </label>
+      <label>Options
+        <span class="vw-opts">
+          <label class="ck"><input type="checkbox" id="vwPoi" checked/> POI (statuses + txid tree)</label>
+          <label class="ck" id="vwDerivWrap">derivation <select id="vwDeriv"><option value="railgun">railgun</option><option value="kohaku">kohaku</option></select> index <input type="number" id="vwIndex" value="0" min="0" style="width:64px"/></label>
+        </span>
+      </label>
+    </div>
+    <div class="vw-key" data-mode="mnemonic">
+      <label>Mnemonic<input type="text" id="vwMnemonic" placeholder="12 or 24 words" spellcheck="false" autocomplete="off"/></label>
+      <div class="vw-note vw-warnline">Sepolia only, for tests, never divulgate a real seed phrase here</div>
+      <div class="vw-derived" id="vwDerived" hidden>viewing private key <code id="vwDerivedVk"></code> <button class="ghost" type="button" id="vwCopyVk">Copy</button> <span class="dim" id="vwDerivedAddr"></span></div>
+    </div>
+    <div class="vw-key" data-mode="viewing" hidden>
+      <label>Private viewing key (32 bytes, hex)<input type="password" id="vwViewing" placeholder="0x…" spellcheck="false" autocomplete="off"/></label>
+      <div class="vw-note"><span id="vwKeyHint">With the 0zk address, the master public key is read from it and checked against the viewing key (no scan). Without it, it is recovered from the first transfer received in clear (full scan on the first load, then cached in the database).</span></div>
+    </div>
+    <div class="vw-actions">
+      <button id="vwLoad">Load</button>
+      <button class="ghost" id="vwShow" type="button">Show / hide</button>
+      <span class="sp"></span>
+      <button class="ghost" id="sync" type="button" disabled>Resync</button>
+      <button class="ghost" id="vwLock" type="button" disabled>Lock</button>
+    </div>
+    <div class="vw-strip">
+      <span>0zk: <code id="zk">—</code></span>
+      <span>mode: <b id="vwModeOut">—</b></span>
+      <span>block: <b id="scan">—</b></span>
+      <span class="vw-status" id="status"></span>
+    </div>
+  </div>
+
+  <nav class="onglets show" id="onglets">
+    <button type="button" data-view="hist" class="on">History</button>
+    <button type="button" data-view="notes">Note lineage</button>
+    <button type="button" data-view="poi">Missing POI <span class="badge" id="poiBadge">0</span></button>
+    <button type="button" data-view="net">Network <span class="dot" id="netDot"></span></button>
+  </nav>
+
+  <div id="hist" class="view show">
+    <div class="carte nx-stats" id="hStats"></div>
+    <div class="nx-wrap">
+      <div class="carte tbl-wrap">
+        <table class="tbl" id="hTable">
+          <thead><tr><th>Date</th><th>Type</th><th>Amounts</th><th>POI</th><th>Tx</th><th>Memo</th></tr></thead>
+          <tbody></tbody>
+        </table>
+        <div class="nx-empty" id="hEmpty">Load a wallet to see its history.</div>
+      </div>
+      <div class="nx-side"><div class="carte nx-panel" id="hDetail"><div class="nx-empty">Click a transaction.</div></div></div>
+    </div>
+  </div>
+
+  <div id="notes">
+    <div class="carte nx-bar">
+      <select id="nxTok" title="Token"><option value="">All tokens</option></select>
+      <select id="nxPoi" title="POI status (on at least one list)">
+        <option value="any">POI: all</option>
+        <option value="Valid">POI: valid</option>
+        <option value="ProofSubmitted">POI: proof submitted</option>
+        <option value="Missing">POI: missing</option>
+        <option value="ShieldBlocked">POI: blocked</option>
+        <option value="none">POI: unknown</option>
+      </select>
+      <select id="nxMode" title="Layout">
+        <option value="layered">Layout: layers</option>
+        <option value="time">Layout: time (blocks)</option>
+      </select>
+      <label class="ck"><input type="checkbox" id="nxSpent" checked/> spent</label>
+      <label class="ck"><input type="checkbox" id="nxExt" checked/> third-party outputs</label>
+      <label class="ck"><input type="checkbox" id="nxCollapse"/> collapse change chains</label>
+      <label class="ck"><input type="checkbox" id="nxLabels" checked/> labels</label>
+      <span class="sep"></span>
+      <input type="text" id="nxSearch" placeholder="hash / txid / nullifier…" spellcheck="false"/>
+      <button class="ghost" id="nxSearchBtn" type="button">Search</button>
+      <span class="sep"></span>
+      <button id="nxRefresh" type="button" title="Re-read the engine state">Refresh</button>
+      <button class="ghost" id="nxSync" type="button" title="Run a sync (scan + POI)">Sync</button>
+      <button class="ghost" id="nxFit" type="button">Fit</button>
+      <button class="ghost" id="nxJson" type="button" title="Snapshot + graph + anomalies (random redacted)">Export JSON</button>
+      <button class="ghost" id="nxSvgExp" type="button">Export SVG</button>
+      <span class="nx-status" id="nxStatus"></span>
+    </div>
+    <div class="carte nx-stats" id="nxStats"></div>
+    <div class="nx-wrap">
+      <div class="carte nx-canvas" id="nxCanvas"></div>
+      <div class="nx-side">
+        <div class="carte nx-panel" id="nxDetail"><div class="nx-empty">Select a note, a transaction or an anomaly.</div></div>
+        <div class="carte nx-panel"><h4>Anomalies</h4><div id="nxAnom"><div class="nx-empty">—</div></div></div>
+        <div class="carte nx-legend">
+          <span><i></i> received note (size ∝ log value)</span>
+          <span><i class="ext"></i> note sent to another address</span>
+          <span><i class="sh"></i> shield</span>
+          <span><i class="tx"></i> Railgun tx</span>
+          <span><i class="un"></i> unshield → 0x</span>
+          <span><i class="gh"></i> undecrypted inputs/outputs</span>
+          <span><i class="pv"></i> POI valid</span>
+          <span><i class="pp"></i> proof submitted</span>
+          <span><i class="pm"></i> POI missing</span>
+          <span><i class="pb"></i> blocked</span>
+          <span><i class="tn"></i> downstream of a blocked note</span>
+          <span><b class="arr in">→</b> incoming from another address</span>
+          <span><b class="arr in-poi">→</b> incoming with POI</span>
+          <span><b class="arr out">→</b> outgoing</span>
+          <span><b class="arr out-nopoi">→</b> outgoing without POI</span>
+          <span>S shield · c change · f fee · → sent · ← received</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="poi" class="view">
+    <div class="carte nx-panel poi-panel">
+      <h4>Emitted transactions without a submitted proof of innocence</h4>
+      <div id="poiList"><div class="nx-empty">—</div></div>
+    </div>
+    <div class="carte nx-panel poi-panel">
+      <h4>Proofs waiting for submission (local queue)</h4>
+      <div id="poiPending"><div class="nx-empty">—</div></div>
+    </div>
+  </div>
+
+  <div id="net" class="view">
+    <div class="carte vw-form">
+      <div class="vw-actions">
+        <label class="ck">Waku node <select id="netSource"><option value="native">in the viewer (Rust)</option><option value="tab">this tab (js-waku)</option></select></label>
+        <label class="ck">nwaku REST (optional) <input type="text" id="netWaku" value="" placeholder="overrides the Waku node" spellcheck="false" style="width:200px"/></label>
+        <label class="ck">listen <input type="number" id="netListen" value="15" min="2" max="90" style="width:56px"/> s</label>
+        <button id="netRun" type="button">Run checks</button>
+        <span class="nx-status" id="netStatus"></span>
+      </div>
+      <div class="vw-strip"><span>Waku node of this tab: <b id="netWakuState">stopped</b></span><span class="dim" id="netWakuDetail"></span></div>
+    </div>
+    <div class="net-grid" id="netCards">
+      <div class="carte net-card" data-k="rpc"><h4>RPC</h4><div class="net-sum">—</div><pre class="dbg net-det"></pre></div>
+      <div class="carte net-card" data-k="subsquid"><h4>Subsquid</h4><div class="net-sum">—</div><pre class="dbg net-det"></pre></div>
+      <div class="carte net-card" data-k="poi"><h4>POI node</h4><div class="net-sum">—</div><pre class="dbg net-det"></pre></div>
+      <div class="carte net-card" data-k="broadcasters"><h4>Broadcasters</h4><div class="net-sum">—</div><pre class="dbg net-det"></pre></div>
+    </div>
+  </div>
+
+  <div class="carte vw-log"><div class="vw-loghead"><span>Log</span><button class="ghost" id="resetLog" type="button">Clear</button></div><pre id="log"></pre></div>
+</div>
+
+<script>
+/* railgun-viewer front — glue */
+(()=>{
+"use strict";
+const $=id=>document.getElementById(id);
+const esc=s=>String(s==null?"":s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const short=(h,n)=>{if(!h)return"—";n=n||6;const s=String(h);return s.length<=2+n+4?s:s.slice(0,2+n)+"…"+s.slice(-4)};
+const POI_FR={Valid:"Valid",ProofSubmitted:"Proof submitted",Missing:"Missing",ShieldBlocked:"Blocked",Unknown:"Unknown"};
+const KIND_FR={shield:"Shield",transact:"Transfer",unshield:"Unshield",receive:"Receipt"};
+function fmtVal(v,dec,maxFrac){try{v=BigInt(v||0)}catch(_){return String(v)}dec=dec==null?18:Number(dec);maxFrac=maxFrac==null?6:maxFrac;const base=10n**BigInt(dec);const ip=v/base,fp=v%base;let fs=fp.toString().padStart(dec,"0");let cut=fs.slice(0,maxFrac);if(/^0*$/.test(cut)&&fp>0n){const i=fs.search(/[1-9]/);cut=fs.slice(0,Math.min(dec,i+3))}cut=cut.replace(/0+$/,"");return ip.toString()+(cut?","+cut:"")}
+const fmtTs=ts=>ts?new Date(Number(ts)*1000).toLocaleString("en-GB"):"—";
+const S={status:null,snap:null,updatedAt:0,view:"hist",sel:null,explorer:""};
+const hasPoi=p=>Object.values(p||{}).some(v=>v==="Valid"||v==="ProofSubmitted");
+const arrow=t=>{let c="";if(t.kind==="receive")c=hasPoi(t.pois)?"in-poi":"in";else if(t.emitted)c=t.poiSubmitted?"out":"out-nopoi";return `<b class="arr ${c}" title="${c||"shield"}">${t.emitted?"↑":"↓"}</b>`};
+const log=m=>{const l=$("log");l.textContent+=m+"\n";l.scrollTop=l.scrollHeight};
+
+// ---- window.noxaku shim for the lineage renderer ----
+window.noxaku={version:"viewer",ready:()=>!!(S.status&&S.status.unlocked&&S.snap),state:()=>({}),
+  notes:async()=>{if(!S.snap)throw new Error("No snapshot: load a wallet first.");return S.snap.graph},
+  tokenInfo:addr=>{const a=(addr||"").toLowerCase();const n=(S.snap&&S.snap.notes||[]).find(x=>(x.token||"").toLowerCase()===a);return n?{symbol:n.symbol,decimals:n.decimals}:{symbol:a.slice(0,6)+"…"+a.slice(-4),decimals:18}},
+  tokenSymbol:addr=>window.noxaku.tokenInfo(addr).symbol,log};
+
+function show(view){S.view=view;document.querySelectorAll("#onglets button").forEach(b=>b.classList.toggle("on",b.dataset.view===view));["hist","notes","poi","net"].forEach(v=>$(v).classList.toggle("show",v===view));if(view==="notes"&&window.NoxakuNotes&&window.noxaku.ready())window.NoxakuNotes.open();if(view==="net"&&wakuSrc()==="tab")Waku.ensure(parseInt($("vwNet").value,10))}
+
+async function api(path,body){const r=await fetch(path,body?{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(body)}:{method:path.startsWith("/api/lock")||path.startsWith("/api/sync")||path.startsWith("/api/refresh")?"POST":"GET"});return r.json()}
+
+function creds(){let mode=$("vwMode").value;const mn=$("vwMnemonic").value.trim(),vk=$("vwViewing").value.trim(),za=($("vwAddress")?$("vwAddress").value:"").trim();if(mode==="mnemonic"&&!mn&&vk)mode=za?"viewing+address":"viewing";if(mode!=="mnemonic"&&!vk&&mn)mode="mnemonic";const c={chainId:parseInt($("vwNet").value,10),rpcUrl:$("vwRpc").value.trim()||null,poi:$("vwPoi").checked,syncNow:true};if(mode==="mnemonic"){if(c.chainId!==11155111)throw new Error("mnemonic input is Sepolia only");if(!mn)throw new Error("enter a mnemonic or a private viewing key");c.mnemonic=mn;c.derivation=$("vwDeriv").value;c.index=parseInt($("vwIndex").value||"0",10)}else{if(!vk)throw new Error("enter a private viewing key or a mnemonic");c.viewingKey=vk;if(mode==="viewing+address"){if(!za)throw new Error('enter the 0zk address, or choose "Private viewing key only"');if(!/^0zk1[qpzry9x8gf2tvdw0s3jn54khce6mua7l]+$/.test(za.toLowerCase()))throw new Error("the 0zk address looks malformed");c.address=za}}return c}
+
+async function load(){const b=$("vwLoad");b.disabled=true;try{const r=await api("/api/unlock",creds());if(!r.ok){log("✗ "+r.error);b.disabled=false;return}$("vwMnemonic").value="";$("vwViewing").value="";$("vwDerived").hidden=true;log("request accepted; follow the status line and the log")}catch(x){log("✗ "+x.message);b.disabled=false}}
+
+async function poll(){try{const st=await api("/api/status");const changed=!S.status||st.updatedAt!==S.updatedAt;S.status=st;$("vwVer").textContent="railgun-viewer "+st.version;$("zk").textContent=st.address||"—";$("vwModeOut").textContent=st.mode||"—";$("scan").textContent=st.syncing?"syncing…":(st.syncedBlock||"—");$("status").textContent=st.stage?st.stage+(st.stageDetail?" · "+st.stageDetail:"")+"…":(st.lastError?"✗ "+st.lastError:(st.unlocked?"ready":"locked"));$("sync").disabled=!st.unlocked||st.syncing;$("vwLock").disabled=!st.unlocked;$("vwLoad").disabled=st.unlocked||!!st.stage;
+  if(changed){S.updatedAt=st.updatedAt;const l=$("log");l.textContent=(st.log||[]).join("\n");l.scrollTop=l.scrollHeight;try{const h=await api("/api/health");renderHealth(h)}catch(_){}if(st.unlocked){const snap=await api("/api/snapshot");if(snap&&snap.transactions){S.snap=snap;S.explorer=snap.graph&&snap.graph.explorer||"";render();if(S.view==="notes"&&window.NoxakuNotes)window.NoxakuNotes.refresh()}}else{S.snap=null;render()}}}catch(x){/* serveur absent */}}
+
+const link=(h)=>h?(S.explorer?`<a href="${esc(S.explorer+h)}" target="_blank" rel="noreferrer"><code>${esc(short(h,6))}</code></a>`:`<code>${esc(short(h,6))}</code>`):"—";
+const poiChips=p=>Object.entries(p||{}).map(([k,v])=>`<span class="poi-chip ${esc(v)}" title="${esc(k)}">${esc(short(k,4))} · ${esc(POI_FR[v]||v)}</span>`).join(" ")||'<span class="poi-chip none">—</span>';
+function totalsHtml(t){return (t.totals||[]).map(x=>{const parts=[];if(x.valueIn!=="0")parts.push("in "+fmtVal(x.valueIn,x.decimals,5));if(x.valueOut!=="0")parts.push("notes "+fmtVal(x.valueOut,x.decimals,5));if(x.unshield!=="0")parts.push("out "+fmtVal(x.unshield,x.decimals,5));return esc(x.symbol)+": "+parts.join(" / ")}).join("<br>")||"—"}
+
+function render(){const snap=S.snap;const tb=$("hTable").querySelector("tbody");tb.innerHTML="";$("hEmpty").style.display=snap?"none":"";$("hStats").innerHTML="";$("poiList").innerHTML='<div class="nx-empty">—</div>';$("poiPending").innerHTML='<div class="nx-empty">—</div>';$("poiBadge").textContent="0";if(!snap)return;
+  const txs=snap.transactions||[];const notes=snap.notes||[];
+  const mine=notes.filter(n=>n.mine),unspent=mine.filter(n=>!n.spent);
+  const bal=new Map();for(const n of unspent){const b=bal.get(n.symbol)||{v:0n,dec:n.decimals};b.v+=BigInt(n.value);bal.set(n.symbol,b)}
+  $("hStats").innerHTML=[["transactions",txs.length],["emitted",txs.filter(t=>t.emitted).length],["notes received",mine.length],["unspent",unspent.length],["sent",notes.filter(n=>!n.mine).length],["without POI",snap.missingPoi.length]].map(([k,v])=>`<div class="st"><b>${v}</b><span>${k}</span></div>`).join("")+[...bal].map(([s,b])=>`<div class="st tok"><b>${esc(fmtVal(b.v,b.dec,5))}</b><span>${esc(s)} in notes</span></div>`).join("");
+  for(const t of txs){const tr=document.createElement("tr");tr.dataset.id=t.id;tr.className=(t.emitted?"em":"")+(S.sel===t.id?" sel":"");tr.innerHTML=`<td>${esc(fmtTs(t.timestamp))}<div class="dim">#${t.blockNumber||"?"}</div></td><td>${arrow(t)} <span class="kind ${t.kind}">${esc(KIND_FR[t.kind]||t.kind)}</span></td><td>${totalsHtml(t)}</td><td>${poiChips(t.pois)}${t.poiPending?' <span class="poi-chip ProofSubmitted">local queue</span>':""}</td><td>${link(t.transactionHash)}</td><td>${t.memos&&t.memos.length?'<span class="memo" title="'+esc(t.memos.join(" | "))+'">✎ '+esc(t.memos[0].slice(0,24))+(t.memos[0].length>24?"…":"")+'</span>':""}</td>`;tr.onclick=()=>select(t.id);tb.appendChild(tr)}
+  // POI tab
+  const mp=snap.missingPoi||[];$("poiBadge").textContent=mp.length;
+  if(mp.length)$("poiList").innerHTML=mp.map(m=>`<div class="an high" data-tx="${esc(m.txId)}"><span class="an-chip high">no POI</span><span class="an-msg"><b>${esc(fmtTs(m.timestamp))}</b> · block ${m.blockNumber||"?"} · ${link(m.transactionHash)}<br>${esc(m.reason)}<br><span class="dim">lists: ${esc((m.lists||[]).map(l=>short(l,4)).join(", ")||"all")} · rg ${esc(short(m.railgunTxid||"",6))}</span></span></div>`).join("");
+  $("poiList").querySelectorAll(".an").forEach(d=>d.onclick=()=>{show("hist");select(d.dataset.tx)});
+  const pp=snap.pendingPoi||[];if(pp.length)$("poiPending").innerHTML=pp.map(p=>`<div class="an warn"><span class="an-chip warn">pending</span><span class="an-msg">rg ${esc(short(p.txid||"",8))} · ${p.inputs} input(s), ${p.outputs} output(s)${p.hasUnshield?", unshield":""} · lists ${esc((p.listKeys||[]).map(l=>short(l,4)).join(", "))}</span></div>`).join("");
+  if(S.sel)renderDetail(S.sel)}
+
+function select(id){S.sel=id;document.querySelectorAll("#hTable tr").forEach(tr=>tr.classList.toggle("sel",tr.dataset.id===id));renderDetail(id)}
+const row=(k,v)=>`<div class="nx-row"><div class="nx-k">${esc(k)}</div><div class="nx-v">${v}</div></div>`;
+function noteLine(h){const n=(S.snap.notes||[]).find(x=>x.hash===h);if(!n)return`<code>${esc(short(h,6))}</code>`;return`<b>${esc(fmtVal(n.value,n.decimals,6))} ${esc(n.symbol)}</b> <span class="dim">${esc(n.origin)}${n.spent?" · spent":""}</span> <code>${esc(short(n.hash,4))}</code>${n.memo?`<div class="memo">✎ ${esc(n.memo)}</div>`:""}<div class="dim">${poiChips(n.pois)}</div>`}
+function renderDetail(id){const el=$("hDetail");const t=(S.snap&&S.snap.transactions||[]).find(x=>x.id===id);if(!t){el.innerHTML='<div class="nx-empty">Click a transaction.</div>';return}
+  let h=`<h3>${arrow(t)} ${esc(KIND_FR[t.kind]||t.kind)} <code>${esc(short(t.railgunTxid||t.transactionHash||t.id,6))}</code></h3>`;
+  if(t.memos&&t.memos.length)h+=`<div class="memo-box">${t.memos.map(m=>"✎ "+esc(m)).join("<br>")}</div>`;
+  h+=row("Block / date",`${t.blockNumber||"?"} · ${esc(fmtTs(t.timestamp))}`);h+=row("Chain tx",link(t.transactionHash));if(t.railgunTxid)h+=row("Railgun txid",`<code>${esc(t.railgunTxid)}</code>`);
+  h+=row("Direction",t.emitted?"emitted by this wallet":"received");h+=row("Balance",totalsHtml(t));
+  h+=row("POI (best status per list)",poiChips(t.pois)+(t.poiPending?' <span class="poi-chip ProofSubmitted">proof in local queue</span>':""));
+  if(t.emitted&&!t.poiSubmitted)h+=row("Alert",'<span class="nx-warn">no proof of innocence submitted for this transaction</span>');
+  h+=row("Inputs ("+t.inputs.length+(t.unknownInputs?" + "+t.unknownInputs+" third-party":"")+")",t.inputs.map(noteLine).join("<hr class='sep'>")||"—");
+  h+=row("Outputs ("+t.outputs.length+(t.unknownOutputs?" + "+t.unknownOutputs+" undecrypted":"")+")",t.outputs.map(noteLine).join("<hr class='sep'>")||"—");
+  if(t.unshields&&t.unshields.length)h+=row("Unshield",t.unshields.map(u=>`<b>${esc(fmtVal(u.amount,u.decimals,6))} ${esc(u.symbol)}</b> → <code>${esc(u.to)}</code> <span class="dim">fee ${esc(fmtVal(u.fee,u.decimals,6))}</span>`).join("<br>"));
+  if(t.debug)h+=row("Debug",`<details><summary class="dim">POI verdict inputs</summary><pre class="dbg">${esc(JSON.stringify(t.debug,null,1))}</pre></details>`);
+  el.innerHTML=h;
+  if(window.NoxakuNotes&&S.snap.graph){const gid=t.railgunTxid||null;if(gid)el.insertAdjacentHTML("beforeend",`<div class="nx-row"><div class="nx-k">Arbre</div><div class="nx-v"><a href="#" id="hGo">show in the lineage</a></div></div>`);const a=$("hGo");if(a)a.onclick=e=>{e.preventDefault();show("notes");setTimeout(()=>window.NoxakuNotes.select(gid),300)}}}
+
+// ---- Waku light node in this tab (js-waku, the wallet's bundle), bridged to the daemon ----
+const b64={enc:u=>{let s="";for(let i=0;i<u.length;i+=0x8000)s+=String.fromCharCode.apply(null,u.subarray(i,i+0x8000));return btoa(s)},dec:s=>Uint8Array.from(atob(s),c=>c.charCodeAt(0))};
+const Waku={status:{state:"stopped",peers:0,error:null},inbox:[],acks:[],timer:null,chainId:null,config:null,loading:null,failedAt:0,
+  loadBundle(){if(window.RailgunWaku)return Promise.resolve();if(!this.loading)this.loading=new Promise((res,rej)=>{const el=document.createElement("script");el.src="/waku-bundle.js";el.onload=res;el.onerror=()=>{this.loading=null;rej(new Error("could not load /waku-bundle.js"))};document.head.append(el)});return this.loading},
+  async ensure(chainId){if(this.chainId===chainId&&["loading","starting","connecting","subscribing","connected"].includes(this.status.state))return;if(this.status.state==="error"&&Date.now()-this.failedAt<30000&&this.chainId===chainId)return;await this.stop();this.chainId=chainId;this.status={state:"loading",peers:0,error:null};if(!this.timer)this.timer=setInterval(()=>this.exchange(),1000);
+    try{await this.loadBundle();if(!this.config)this.config=(await api("/api/defaults")).waku;const topics=["fees","transact-response"].map(t=>`/railgun/v2/0-${chainId}-${t}/json`);
+      await window.RailgunWaku.start({...this.config,contentTopics:topics,peerTimeoutMs:60000},m=>{this.inbox.push({contentTopic:m.contentTopic,payload:b64.enc(m.payload),timestampNs:m.timestampNs});if(this.inbox.length>500)this.inbox.shift()},st=>{this.status=st})}
+    catch(e){this.failedAt=Date.now();this.status={state:"error",peers:0,error:e&&e.message?e.message:String(e)}}},
+  async exchange(){const st=window.RailgunWaku?{...this.status,peers:window.RailgunWaku.status().peers}:this.status;const messages=this.inbox.splice(0);const acks=this.acks.splice(0);
+    try{const {publish}=await api("/api/waku/exchange",{connected:st.state==="connected",peers:st.peers||0,detail:st.error?`${st.state}: ${st.error}`:st.state,messages,acks});
+      for(const p of publish||[]){try{const peers=await window.RailgunWaku.send(p.contentTopic,b64.dec(p.payload));this.acks.push({id:p.id,peers})}catch(e){this.acks.push({id:p.id,peers:0,error:e&&e.message?e.message:String(e)})}}}
+    catch{this.inbox.unshift(...messages);this.acks.unshift(...acks)}
+    const el=$("netWakuState");if(el){el.textContent=st.state+(st.peers?" · "+st.peers+" peer(s)":"")+(this.chainId?" · chain "+this.chainId:"");$("netWakuDetail").textContent=st.error||""}},
+  async stop(){if(this.timer){clearInterval(this.timer);this.timer=null}this.chainId=null;this.inbox=[];if(window.RailgunWaku){try{await window.RailgunWaku.stop()}catch{}}this.status={state:"stopped",peers:0,error:null}}};
+function clearHealth(){S.health=null;for(const k of["rpc","subsquid","poi","broadcasters"]){const card=document.querySelector(`.net-card[data-k="${k}"]`);card.className="carte net-card";card.querySelector(".net-sum").textContent="—";card.querySelector(".net-det").textContent=""}$("netDot").className="dot";$("netStatus").textContent="network changed: run the checks again"}
+function renderHealth(h){const rep=h&&h.report;if(rep&&rep.chainId!==parseInt($("vwNet").value,10)){clearHealth();return}$("netStatus").textContent=h&&h.running?"checking…":(rep?"checked "+fmtTs(Math.floor(rep.checkedAt/1000)):"not checked yet");$("netRun").disabled=!!(h&&h.running);const order={down:3,warn:2,ok:1,skip:0};let worst="skip";for(const k of["rpc","subsquid","poi","broadcasters"]){const card=document.querySelector(`.net-card[data-k="${k}"]`);const p=rep&&rep[k];card.className="carte net-card "+(p?"lv-"+p.level:"");if(!p){card.querySelector(".net-sum").textContent="—";card.querySelector(".net-det").textContent="";continue}card.querySelector(".net-sum").innerHTML=`<span class="lv">${esc(p.level)}</span> ${esc(p.summary)}${p.latencyMs!=null?` <span class="dim">${p.latencyMs} ms</span>`:""}${p.error?`<div class="nx-warn">${esc(p.error)}</div>`:""}`;card.querySelector(".net-det").textContent=JSON.stringify(p.details,null,1);if(order[p.level]>order[worst])worst=p.level}$("netDot").className="dot "+(rep?"lv-"+worst:"")}
+function wakuSrc(){return $("netWaku").value.trim()?"nwaku":($("netSource")?$("netSource").value:"tab")}
+async function runHealth(){const chainId=parseInt($("vwNet").value,10);$("netRun").disabled=true;
+  if(wakuSrc()==="tab"){await Waku.ensure(chainId);const t0=Date.now();while(Waku.status.state!=="connected"&&Date.now()-t0<30000){$("netStatus").textContent="waiting for the tab's Waku node ("+Waku.status.state+")…";if(Waku.status.state==="error")break;await new Promise(r=>setTimeout(r,1000))}
+    if(Waku.status.state!=="connected")log("network: the tab's Waku node is "+Waku.status.state+" for chain "+chainId+"; broadcaster count will be low")}
+  const r=await api("/api/health/run",{chainId,rpcUrl:$("vwRpc").value.trim()||null,wakuUrl:$("netWaku").value.trim()||null,wakuSource:wakuSrc(),listenSecs:parseInt($("netListen").value||"15",10)});if(!r.ok){log("✗ health: "+r.error);$("netRun").disabled=false}else{$("netStatus").textContent="checking…"}}
+let deriveTimer=null;
+async function deriveFromMnemonic(){const m=$("vwMnemonic").value.trim();const box=$("vwDerived");if(!m||m.split(/\s+/).length<12){box.hidden=true;return}
+  try{const r=await api("/api/derive",{mnemonic:m,derivation:$("vwDeriv").value,index:parseInt($("vwIndex").value||"0",10),chainId:parseInt($("vwNet").value,10)});if(!r.ok){box.hidden=true;return}$("vwDerivedVk").textContent=r.viewingKey;$("vwDerivedAddr").textContent=r.address?"· "+r.address:"";box.hidden=false}catch(_){box.hidden=true}}
+function scheduleDerive(){clearTimeout(deriveTimer);deriveTimer=setTimeout(deriveFromMnemonic,400)}
+function syncMnemonicGate(){const sepolia=$("vwNet").value==="11155111";const m=$("vwMnemonic");m.disabled=!sepolia;m.closest(".vw-key").classList.toggle("gated",!sepolia);if(!sepolia){m.value="";const opt=$("vwMode").querySelector('option[value="mnemonic"]');opt.disabled=true;if($("vwMode").value==="mnemonic"){$("vwMode").value="viewing";$("vwMode").dispatchEvent(new Event("change"))}}else{$("vwMode").querySelector('option[value="mnemonic"]').disabled=false}}
+function bind(){document.querySelectorAll("#onglets button").forEach(b=>b.onclick=()=>show(b.dataset.view));$("netRun").onclick=runHealth;syncMnemonicGate();
+  ["vwMnemonic","vwDeriv","vwIndex"].forEach(id=>$(id).addEventListener("input",scheduleDerive));$("vwDeriv").addEventListener("change",scheduleDerive);
+  $("vwCopyVk").onclick=()=>{navigator.clipboard&&navigator.clipboard.writeText($("vwDerivedVk").textContent).then(()=>log("viewing key copied"))};
+  $("vwNet").addEventListener("change",()=>{syncMnemonicGate();clearHealth();if(wakuSrc()==="tab"&&Waku.chainId!==null)Waku.ensure(parseInt($("vwNet").value,10))});
+  const onWakuSrc=()=>{if(wakuSrc()!=="tab")Waku.stop();else if(S.view==="net")Waku.ensure(parseInt($("vwNet").value,10))};
+  $("netWaku").addEventListener("change",onWakuSrc);$("netSource").addEventListener("change",onWakuSrc);
+  api("/api/defaults").then(d=>{if(!d||!d.nativeWaku){const o=$("netSource").querySelector('option[value="native"]');if(o){o.remove();onWakuSrc()}}}).catch(()=>{});
+  $("vwMode").onchange=()=>{const m=$("vwMode").value;document.querySelectorAll(".vw-key").forEach(d=>d.hidden=d.dataset.mode!==m);$("vwDerivWrap").style.display=m==="mnemonic"?"":"none"};
+  $("vwLoad").onclick=load;
+  $("vwShow").onclick=()=>document.querySelectorAll(".vw-key input").forEach(i=>{if(i.id!=="vwMnemonic")i.type=i.type==="password"?"text":"password"});
+  $("sync").onclick=()=>api("/api/sync");
+  $("vwLock").onclick=async()=>{await api("/api/lock");S.snap=null;S.sel=null;render();log("locked")};
+  $("resetLog").onclick=()=>{$("log").textContent=""};
+  document.addEventListener("keydown",e=>{if(e.key==="Enter"&&e.target&&e.target.closest&&e.target.closest("#vwForm"))load()});
+  poll();setInterval(poll,2000)}
+document.readyState==="loading"?document.addEventListener("DOMContentLoaded",bind):bind();
+})();
+</script>
+
+<script>
+/* ==================================================================
+   NOXAKU — Arbre des notes (v1.9.0)
+   Separate tab: full note lineage of the wallet (notes/tx DAG).
+   Source unique : window.noxaku.notes() (snapshot local de l'engine).
+   No dependency, no network call.
+   API : window.NoxakuNotes = { open, refresh, select, _pure }
+   ================================================================== */
+(() => {
+"use strict";
+const NS="http://www.w3.org/2000/svg";
+const $=s=>document.getElementById(s);
+const esc=s=>String(s==null?"":s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const norm=h=>{if(h==null||h===!1||h==="")return null;const s=String(h).replace(/^0x/i,"").toLowerCase();return /^[0-9a-f]+$/.test(s)?"0x"+s.padStart(64,"0"):String(h)};
+const short=(h,n)=>{if(!h)return"—";n=n||6;const s=String(h);return s.length<=2+n+4?s:s.slice(0,2+n)+"…"+s.slice(-4)};
+const POI_RANK={Valid:0,ProofSubmitted:1,Missing:2,ShieldBlocked:3};
+const POI_COL={Valid:"#0F6E56",ProofSubmitted:"#B8860B",Missing:"#E1000F",ShieldBlocked:"#16161D",none:"#b9b9cf"};
+const POI_FR={Valid:"Valid",ProofSubmitted:"Proof submitted",Missing:"Missing",ShieldBlocked:"Blocked",none:"Unknown"};
+const BUCKET_FR={Spendable:"Spendable",ShieldPending:"Shield pending",ShieldBlocked:"Shield blocked",ProofSubmitted:"Proof submitted",MissingInternalPOI:"Missing internal POI",MissingExternalPOI:"Missing external POI",Spent:"Spent",Unknown:"Unknown"};
+const ORIGIN_FR={shield:"Shield (from the public side)",change:"Change",self:"Self-transfer",transfer_in:"Received from another address",transfer_out:"Sent to another address",fee:"Broadcaster fee",unknown:"Unknown"};
+const TOKEN_COL=["#000091","#6A6AF4","#B8860B","#0F6E56","#8B2252","#2F6F8F","#7A5C00","#4B4B7A"];
+const RECENT_BLOCKS=300; // ~1 h sur Sepolia (12 s/bloc)
+
+/* ---------- format ---------- */
+function fmtVal(v,dec,maxFrac){try{v=BigInt(v||0)}catch(_){return String(v)}dec=dec==null?18:Number(dec);maxFrac=maxFrac==null?6:maxFrac;const neg=v<0n;if(neg)v=-v;const base=10n**BigInt(dec);const ip=v/base,fp=v%base;let fs=fp.toString().padStart(dec,"0");let cut=fs.slice(0,maxFrac);if(/^0*$/.test(cut)&&fp>0n){const i=fs.search(/[1-9]/);cut=fs.slice(0,Math.min(dec,i+3))}cut=cut.replace(/0+$/,"");return(neg?"-":"")+ip.toString()+(cut?","+cut:"")}
+const fmtTs=ts=>{if(!ts)return"—";const d=new Date(Number(ts)*(Number(ts)>1e12?1:1000));return isNaN(d)?"—":d.toLocaleString("en-GB")};
+const worstPoi=p=>{if(!p)return"none";let w="none",r=-1;for(const v of Object.values(p)){const k=POI_RANK[v];if(k!=null&&k>r){r=k;w=v}}return w};
+const bestPoi=p=>{if(!p)return"none";let w="none",r=99;for(const v of Object.values(p)){const k=POI_RANK[v];if(k!=null&&k<r){r=k;w=v}}return w};
+
+/* ---------- model ---------- */
+function bucketOf(n,lists){if(n.spent)return"Spent";const p=n.pois;const shield=n.origin==="shield";const change=n.origin==="change";if(!lists.length)return p?(Object.values(p).every(v=>v==="Valid")?"Spendable":"Unknown"):"Unknown";if(!p||lists.some(k=>p[k]==null))return shield?"ShieldPending":change?"MissingInternalPOI":"MissingExternalPOI";if(lists.every(k=>p[k]==="Valid"))return"Spendable";if(lists.some(k=>p[k]==="ShieldBlocked"))return"ShieldBlocked";if(shield)return"ShieldPending";if(lists.some(k=>p[k]==="ProofSubmitted"))return"ProofSubmitted";return change?"MissingInternalPOI":"MissingExternalPOI"}
+
+function buildGraph(snap,opts){
+  opts=opts||{};
+  const nodes=new Map(),edges=[];
+  const lists=(snap.listKeys||[]).slice();
+  const addNode=n=>{n.in=n.in||[];n.out=n.out||[];nodes.set(n.id,n);return n};
+  const link=(a,b,v)=>{const A=nodes.get(a),B=nodes.get(b);if(!A||!B)return;if(A.out.includes(b))return;A.out.push(b);B.in.push(a);edges.push({from:a,to:b,value:v==null?null:v})};
+  const bigi=v=>{try{return BigInt(v||0)}catch(_){return 0n}};
+  const isShieldType=t=>t==="ShieldCommitment"||t==="LegacyGeneratedCommitment";
+  const tokens=new Map();const tokKey=(addr,sym)=>{const k=(addr||sym||"?").toLowerCase();if(!tokens.has(k))tokens.set(k,{key:k,addr:addr,sym:sym||"?",color:TOKEN_COL[tokens.size%TOKEN_COL.length]});return tokens.get(k)};
+  // notes
+  const noteOf=(c)=>{const id=norm(c.commitment);let n=nodes.get(id);if(!n){n=addNode({id,type:"note",hash:id,mine:!1,sentByMe:!1,value:bigi(c.value),sym:c.symbol||"?",dec:c.decimals==null?18:c.decimals,token:c.tokenAddress||null,npk:c.npk,random:c.random,memo:c.memoText||null,block:c.blockNumber||null,ts:c.timestamp||null,tree:c.tree,position:c.position,gpos:c.globalPosition,ctype:c.commitmentType||null,createdTx:norm(c.txid),createdRid:null,spent:!1,spendtxid:null,spentBy:null,nullifier:null,pois:null,sentPois:null,blinded:c.blindedCommitment||null,outputType:c.outputType,shieldFee:c.shieldFee||null,sender:null,recipient:null,origin:"unknown",taint:!1});n.tk=tokKey(n.token,n.sym)}return n};
+  for(const r of snap.received||[]){const n=noteOf(r);n.mine=!0;n.pois=r.poisPerList||n.pois;n.nullifier=norm(r.nullifier);n.spendtxid=norm(r.spendtxid);n.spent=!!n.spendtxid;n.createdRid=norm(r.transactCreationRailgunTxid)||n.createdRid;n.sender=r.senderAddress||n.sender;n.ctype=r.commitmentType||n.ctype;if(r.blockNumber)n.block=r.blockNumber;if(r.timestamp)n.ts=r.timestamp;n.blinded=r.blindedCommitment||n.blinded;if(n.outputType==null)n.outputType=r.outputType;if(r.tree!=null){n.tree=r.tree;n.position=r.position;n.gpos=r.globalPosition}}
+  for(const s of snap.sent||[]){const n=noteOf(s);n.sentByMe=!0;n.sentPois=s.poisPerList||null;if(!n.pois)n.pois=s.poisPerList||null;n.createdRid=norm(s.railgunTxid)||n.createdRid;n.recipient=s.recipientAddress||n.recipient;if(s.outputType!=null)n.outputType=s.outputType;n.ctype=n.ctype||s.commitmentType||null;if(!n.block&&s.blockNumber)n.block=s.blockNumber;if(!n.ts&&s.timestamp)n.ts=s.timestamp;n.blinded=n.blinded||s.blindedCommitment||null;if(s.tree!=null&&n.tree==null){n.tree=s.tree;n.position=s.position;n.gpos=s.globalPosition}}
+  for(const n of nodes.values()){if(n.type!=="note")continue;if(isShieldType(n.ctype))n.origin="shield";else if(n.sentByMe){n.origin=n.outputType===2?"change":n.outputType===1?"fee":n.mine?"self":"transfer_out"}else if(n.mine)n.origin=n.outputType===2?"change":"transfer_in";else n.origin="unknown"}
+  // railgun txs
+  const byTxid=new Map();
+  for(const[rid,t]of Object.entries(snap.railgunTxs||{})){const id=norm(rid);const un=t.unshield;const tx=addNode({id,type:"tx",kind:"transact",rid:id,txid:norm(t.txid),block:t.blockNumber||null,ts:t.timestamp||null,nullifiers:(t.nullifiers||[]).map(norm),commitments:(t.commitments||[]).map(norm),bound:t.boundParamsHash||null,vhash:t.verificationHash||null,treeIn:t.utxoTreeIn,treeOut:t.utxoTreeOut,batchStart:t.utxoBatchStartPositionOut,unshieldInfo:un?{to:un.toAddress,value:bigi(un.value),token:un.tokenAddress,sym:null}:null,resolved:!0,fee:!1,unknownIn:0,unknownOut:0,pois:null,inputs:[],outputs:[]});if(tx.txid){if(!byTxid.has(tx.txid))byTxid.set(tx.txid,[]);byTxid.get(tx.txid).push(tx)}}
+  const chainTx=(txid,block,ts)=>{const id="chain:"+txid;let t=nodes.get(id);if(!t)t=addNode({id,type:"tx",kind:"chain",rid:null,txid,block:block||null,ts:ts||null,nullifiers:[],commitments:[],resolved:!1,fee:!1,unknownIn:0,unknownOut:0,pois:null,inputs:[],outputs:[]});else{if(!t.block&&block)t.block=block;if(!t.ts&&ts)t.ts=ts}return t};
+  const shieldTx=(txid,block,ts)=>{const id="shield:"+txid;let t=nodes.get(id);if(!t)t=addNode({id,type:"tx",kind:"shield",rid:null,txid,block:block||null,ts:ts||null,nullifiers:[],commitments:[],resolved:!0,fee:!1,unknownIn:0,unknownOut:0,pois:null,inputs:[],outputs:[]});return t};
+  // creation → parent
+  for(const n of nodes.values()){if(n.type!=="note")continue;let p=null;if(n.origin==="shield")p=shieldTx(n.createdTx||("unknown:"+n.id),n.block,n.ts);else if(n.createdRid&&nodes.has(n.createdRid))p=nodes.get(n.createdRid);else if(n.createdTx)p=chainTx(n.createdTx,n.block,n.ts);else p=chainTx("unknown:"+n.id,n.block,n.ts);n.parent=p.id;p.outputs.push(n.id);link(p.id,n.id,n.value);if(n.origin==="fee")p.fee=!0;if(n.sentByMe){p.poiOutputs=p.poiOutputs||[];p.poiOutputs.push({id:n.id,pois:n.sentPois||null});if(n.sentPois){p.pois=p.pois||{};for(const[k,v]of Object.entries(n.sentPois)){const r=POI_RANK[v];if(p.pois[k]==null||(POI_RANK[p.pois[k]]??-1)<r)p.pois[k]=v}}}if(!p.block&&n.block)p.block=n.block;if(!p.ts&&n.ts)p.ts=n.ts}
+  // spends
+  const anomalies=[];
+  for(const n of nodes.values()){if(n.type!=="note"||!n.mine||!n.spent)continue;const cands=byTxid.get(n.spendtxid)||[];let t=cands.find(c=>n.nullifier&&c.nullifiers.includes(n.nullifier));if(!t&&cands.length===1){t=cands[0];anomalies.push({code:"nullifier-unmatched",sev:"warn",msg:"Note nullifier absent from the Railgun tx carrying its spend txid",nodes:[n.id,t.id]})}if(!t){t=chainTx(n.spendtxid,null,null);n.spendUnresolved=!0;anomalies.push({code:"spend-unresolved",sev:"warn",msg:"Spend not resolved in the txid tree (incomplete TXID tree?)",nodes:[n.id,t.id]})}n.spentBy=t.id;t.inputs.push(n.id);link(n.id,t.id,n.value)}
+  // unshield events
+  const unByRid=new Set();
+  for(const u of snap.unshields||[]){const rid=norm(u.railgunTxid);let t=rid&&nodes.get(rid);if(!t)t=chainTx(norm(u.txid),u.blockNumber,u.timestamp);const id="unshield:"+norm(u.txid)+":"+(u.eventLogIndex==null?"x":u.eventLogIndex);if(nodes.has(id))continue;const tk=tokKey(u.tokenAddress,u.symbol);const un=addNode({id,type:"unshield",txid:norm(u.txid),rid,to:u.toAddress,value:bigi(u.amount),fee:bigi(u.fee),sym:u.symbol||"?",dec:u.decimals==null?18:u.decimals,token:u.tokenAddress,tk,block:u.blockNumber||t.block,ts:u.timestamp||t.ts,pois:u.poisPerList||null,taint:!1});t.outputs.push(id);link(t.id,id,un.value);if(rid)unByRid.add(rid);t.poiOutputs=t.poiOutputs||[];t.poiOutputs.push({id,pois:un.pois||null});if(un.pois){t.pois=t.pois||{};for(const[k,v]of Object.entries(un.pois)){const r=POI_RANK[v];if(t.pois[k]==null||(POI_RANK[t.pois[k]]??-1)<r)t.pois[k]=v}}}
+  for(const t of nodes.values()){if(t.type!=="tx"||!t.unshieldInfo||unByRid.has(t.id))continue;const ui=t.unshieldInfo;if(ui.value===0n&&!ui.to)continue;const inf=(window.noxaku&&window.noxaku.tokenInfo)?window.noxaku.tokenInfo(ui.token):{symbol:"?",decimals:18};const tk=tokKey(ui.token,inf.symbol);const id="unshield:"+t.id;const un=addNode({id,type:"unshield",txid:t.txid,rid:t.id,to:ui.to,value:ui.value,fee:null,sym:inf.symbol,dec:inf.decimals,token:ui.token,tk,block:t.block,ts:t.ts,pois:null,taint:!1,fromTree:!0});t.outputs.push(id);link(t.id,id,un.value)}
+  // ghosts (undecrypted inputs/outputs)
+  for(const t of [...nodes.values()]){if(t.type!=="tx"||!t.resolved||t.kind==="shield")continue;const mineNulls=new Set(t.inputs.map(i=>nodes.get(i)).filter(Boolean).map(n=>n.nullifier));const unIn=t.nullifiers.filter(x=>!mineNulls.has(x));const known=new Set(t.outputs.map(i=>nodes.get(i)).filter(x=>x&&x.type==="note").map(x=>x.hash));const unOut=t.commitments.filter(x=>!known.has(x));t.unknownIn=unIn.length;t.unknownOut=unOut.length;if(unIn.length){const g=addNode({id:"gin:"+t.id,type:"ghost",dir:"in",n:unIn.length,items:unIn,txid:t.txid,block:t.block,ts:t.ts,taint:!1});t.inputs.push(g.id);link(g.id,t.id,null);if(mineNulls.size)anomalies.push({code:"partial-inputs",sev:"warn",msg:"Tx spending my notes but "+unIn.length+" nullifier(s) not matched to my notes",nodes:[t.id]})}if(unOut.length){const g=addNode({id:"gout:"+t.id,type:"ghost",dir:"out",n:unOut.length,items:unOut,txid:t.txid,block:t.block,ts:t.ts,taint:!1});t.outputs.push(g.id);link(t.id,g.id,null)}t.kind=t.inputs.some(i=>{const x=nodes.get(i);return x&&x.type==="note"&&x.mine})?"transact":"external"}
+  for(const t of nodes.values()){if(t.type==="tx"&&t.kind==="chain"&&!t.inputs.some(i=>{const x=nodes.get(i);return x&&x.type==="note"&&x.mine}))t.kind="external"}
+  // buckets, valeurs par tx
+  for(const n of nodes.values())if(n.type==="note")n.bucket=bucketOf(n,lists);
+  const sumTok=ids=>{const m=new Map();for(const id of ids){const x=nodes.get(id);if(!x||(x.type!=="note"&&x.type!=="unshield"))continue;const k=x.tk.key;m.set(k,(m.get(k)||0n)+x.value+(x.type==="unshield"&&x.fee?x.fee:0n))}return m};
+  for(const t of nodes.values()){if(t.type!=="tx")continue;t.valIn=sumTok(t.inputs);t.valOut=sumTok(t.outputs)}
+  // anomalies
+  let maxBlock=0;for(const x of nodes.values())if(x.block&&x.block>maxBlock)maxBlock=x.block;
+  const nowS=Date.now()/1000;const isRecent=x=>{if(x.ts&&x.ts>1e9)return nowS-Number(x.ts)<3600;return !!(x.block&&maxBlock-x.block<RECENT_BLOCKS)};
+  for(const t of nodes.values()){if(t.type!=="tx")continue;const mineIn=t.inputs.filter(i=>{const x=nodes.get(i);return x&&x.type==="note"&&x.mine});if(!mineIn.length)continue;const submitted=(t.poiOutputs||[]).some(o=>o.pois&&Object.values(o.pois).some(v=>v==="ProofSubmitted"||v==="Valid"));if(!submitted){const recent=isRecent(t);anomalies.push({code:"spend-no-poi",sev:recent?"warn":"high",msg:(recent?"Recent spend without submitted POI (node latency?)":"Spend without a submitted POI on any list: outside PPOI"),nodes:[t.id,...mineIn]})}if(t.resolved&&t.unknownIn===0&&t.unknownOut===0){for(const[k,vin]of t.valIn){const vout=t.valOut.get(k)||0n;if(vin!==vout)anomalies.push({code:"imbalance",sev:"high",msg:"Inputs "+vin+" ≠ outputs "+vout+" ("+k.slice(0,10)+") on a fully known tx",nodes:[t.id]})}}}
+  for(const n of nodes.values()){if(n.type!=="note")continue;const p=n.parent&&nodes.get(n.parent);if(p&&p.type==="tx"&&p.resolved&&p.kind!=="shield"&&p.commitments.length&&!p.commitments.includes(n.hash))anomalies.push({code:"hash-not-in-tx",sev:"high",msg:"Note hash absent from the commitments of its creating tx (phantom?)",nodes:[n.id,p.id]});if(n.pois){const vs=new Set(Object.values(n.pois));if(vs.size>1)anomalies.push({code:"list-disagreement",sev:"warn",msg:"POI status differs across lists: "+[...Object.entries(n.pois)].map(([k,v])=>short(k,4)+"="+v).join(", "),nodes:[n.id]});if([...vs].includes("ShieldBlocked"))anomalies.push({code:"blocked",sev:"high",msg:"Note blocked by a PPOI list",nodes:[n.id]})}if(n.mine&&!n.spent&&n.origin!=="shield"){const old=!isRecent(n)&&(n.ts||n.block);const missing=!n.pois||Object.values(n.pois).every(v=>v==="Missing");if(old&&missing)anomalies.push({code:"orphan",sev:"warn",msg:"POI never submitted for this note (orphan: the creating engine did not persist the proof)",nodes:[n.id]})}if(n.mine&&!n.spent&&n.origin==="shield"){const old=!isRecent(n)&&(n.ts||n.block);const notValid=!n.pois||!Object.values(n.pois).some(v=>v==="Valid");if(old&&notValid&&!(n.pois&&Object.values(n.pois).includes("ShieldBlocked")))anomalies.push({code:"shield-stuck",sev:"warn",msg:"Shield still not validated after ~1 h (POI node behind, or shield refused)",nodes:[n.id]})}if(n.value===0n)n.dummy=!0}
+  const zeros=[...nodes.values()].filter(x=>x.type==="note"&&x.dummy);if(zeros.length)anomalies.push({code:"zero-value",sev:"info",msg:zeros.length+" zero-value note(s) (padding outputs)",nodes:zeros.map(z=>z.id)});
+  // taint: downstream of blocked notes
+  const seeds=[...nodes.values()].filter(x=>x.type==="note"&&x.pois&&Object.values(x.pois).includes("ShieldBlocked")).map(x=>x.id);if(seeds.length){const q=[...seeds],seen=new Set(q);while(q.length){const id=q.shift();const x=nodes.get(id);x.taint=!0;for(const o of x.out)if(!seen.has(o)){seen.add(o);q.push(o)}}const tainted=[...seen].filter(id=>!seeds.includes(id)&&nodes.get(id).type==="note");if(tainted.length)anomalies.push({code:"taint",sev:"info",msg:tainted.length+" note(s) downstream of a blocked note",nodes:tainted})}
+  // direction and POI flags used by the edge colouring
+  const hasPoi=p=>!!(p&&Object.values(p).some(v=>v==="ProofSubmitted"||v==="Valid"));
+  for(const t of nodes.values()){if(t.type!=="tx")continue;t.emitted=t.inputs.some(i=>{const x=nodes.get(i);return x&&x.type==="note"&&x.mine});t.poiSubmitted=(t.poiOutputs||[]).some(o=>hasPoi(o.pois));t.inPoi=t.outputs.some(id=>{const x=nodes.get(id);return x&&x.type==="note"&&x.mine&&hasPoi(x.pois)})}
+  return{nodes,edges,anomalies,lists,tokens,maxBlock};
+}
+
+/* ---------- filter → subgraph ---------- */
+function subgraph(g,f){
+  f=f||{};const keepNote=n=>{if(f.token&&n.tk.key!==f.token)return!1;if(!f.spent&&n.spent)return!1;if(!f.external&&!n.mine)return!1;if(f.poi&&f.poi!=="any"){const w=n.pois?Object.values(n.pois):[];if(f.poi==="none")return!w.length;if(!w.includes(f.poi))return!1}return!0};
+  const keep=new Set();for(const n of g.nodes.values())if(n.type==="note"&&keepNote(n))keep.add(n.id);
+  for(const n of [...keep]){const x=g.nodes.get(n);for(const id of [...x.in,...x.out]){const y=g.nodes.get(id);if(y&&y.type==="tx")keep.add(id)}}
+  for(const id of [...keep]){const x=g.nodes.get(id);if(x.type!=="tx")continue;for(const o of [...x.out,...x.in]){const y=g.nodes.get(o);if(!y)continue;if(y.type==="unshield"&&(!f.token||y.tk.key===f.token))keep.add(o);if(y.type==="ghost"&&f.external)keep.add(o)}}
+  const nodes=new Map();for(const id of keep){const x=g.nodes.get(id);nodes.set(id,Object.assign({},x,{in:x.in.filter(i=>keep.has(i)),out:x.out.filter(o=>keep.has(o))}))}
+  const edges=g.edges.filter(e=>keep.has(e.from)&&keep.has(e.to));
+  return{nodes,edges,anomalies:g.anomalies,lists:g.lists,tokens:g.tokens,maxBlock:g.maxBlock};
+}
+
+/* ---------- collapse of change chains ---------- */
+function collapseChains(g){
+  const nodes=new Map();for(const[k,v]of g.nodes)nodes.set(k,Object.assign({},v,{in:v.in.slice(),out:v.out.slice()}));
+  const isHop=t=>{if(!t||t.type!=="tx"||t.kind==="shield")return!1;const ins=t.in.map(i=>nodes.get(i)).filter(Boolean);const mineIn=ins.filter(x=>x.type==="note"&&x.mine);if(mineIn.length!==1||ins.length!==1)return!1;const outs=t.out.map(o=>nodes.get(o)).filter(Boolean);if(outs.some(o=>o.type==="unshield"))return!1;const mineOut=outs.filter(o=>o.type==="note"&&o.mine&&o.origin!=="fee");return mineOut.length===1};
+  const nextOf=t=>{const outs=t.out.map(o=>nodes.get(o));return outs.find(o=>o&&o.type==="note"&&o.mine&&o.origin!=="fee")};
+  const removed=new Set(),runs=[];const visited=new Set();
+  for(const t of [...nodes.values()]){if(!isHop(t)||visited.has(t.id))continue;const inNote=nodes.get(t.in[0]);const pTx=inNote&&inNote.in[0]&&nodes.get(inNote.in[0]);if(pTx&&isHop(pTx)&&nextOf(pTx)&&nextOf(pTx).id===inNote.id)continue; // not the start of a run
+    const run=[];let cur=t;while(cur&&isHop(cur)&&!visited.has(cur.id)){visited.add(cur.id);run.push(cur);const nx=nextOf(cur);if(!nx)break;const consumer=nx.out.map(o=>nodes.get(o)).find(o=>o&&o.type==="tx");if(!consumer||!isHop(consumer)||consumer.in.length!==1)break;cur=consumer}
+    if(run.length>=2)runs.push(run)}
+  const edges=g.edges.filter(e=>!(nodes.has(e.from)&&nodes.has(e.to))||!1).slice();let E=g.edges.slice();
+  for(const run of runs){const first=run[0],last=run[run.length-1];const inNote=nodes.get(first.in[0]);const outNote=nextOf(last);let sideOut=0,sideVal=0n;for(const t of run){for(const o of t.out){const x=nodes.get(o);if(!x)continue;if(x===nextOf(t))continue;sideOut++;if(x.type==="note")sideVal+=x.value}}
+    const id="chain:"+first.id+":"+last.id;const sup={id,type:"chain",n:run.length,side:sideOut,sideVal,hops:run.map(r=>r.id),block:first.block,ts:first.ts,blockEnd:last.block,in:[inNote.id],out:[outNote.id],taint:run.some(r=>r.taint),emitted:!0,poiSubmitted:run.every(r=>r.poiSubmitted)};
+    for(let i=0;i<run.length;i++){removed.add(run[i].id);for(const o of run[i].out){const x=nodes.get(o);if(x&&x.id!==outNote.id)removed.add(o)}}
+    nodes.set(id,sup);inNote.out=inNote.out.filter(o=>o!==first.id).concat([id]);outNote.in=outNote.in.filter(i=>i!==last.id).concat([id]);
+    E=E.filter(e=>!removed.has(e.from)&&!removed.has(e.to));E.push({from:inNote.id,to:id,value:inNote.value},{from:id,to:outNote.id,value:outNote.value})}
+  for(const r of removed)nodes.delete(r);
+  return{nodes,edges:E,anomalies:g.anomalies,lists:g.lists,tokens:g.tokens,maxBlock:g.maxBlock};
+}
+
+/* ---------- components ---------- */
+function components(g){const parent=new Map();const find=x=>{while(parent.get(x)!==x){parent.set(x,parent.get(parent.get(x)));x=parent.get(x)}return x};for(const id of g.nodes.keys())parent.set(id,id);for(const e of g.edges){const a=find(e.from),b=find(e.to);if(a!==b)parent.set(a,b)}const comps=new Map();for(const id of g.nodes.keys()){const r=find(id);if(!comps.has(r))comps.set(r,[]);comps.get(r).push(id)}const out=[...comps.values()].map(ids=>{const ns=ids.map(i=>g.nodes.get(i));const blocks=ns.map(n=>n.block||0).filter(Boolean);return{ids,minBlock:blocks.length?Math.min(...blocks):0,maxBlock:blocks.length?Math.max(...blocks):0,nodes:ns}});out.sort((a,b)=>a.minBlock-b.minBlock||a.ids.length-b.ids.length);return out}
+
+/* ---------- layouts ---------- */
+const GAP={col:150,row:56,band:70,pad:40};
+function layerAssign(g,ids){const set=new Set(ids);const layer=new Map();const indeg=new Map();for(const id of ids)indeg.set(id,g.nodes.get(id).in.filter(i=>set.has(i)).length);const q=[...ids].filter(id=>indeg.get(id)===0);for(const id of q)layer.set(id,0);let head=0;while(head<q.length){const id=q[head++];const L=layer.get(id);for(const o of g.nodes.get(id).out){if(!set.has(o))continue;layer.set(o,Math.max(layer.get(o)||0,L+1));indeg.set(o,indeg.get(o)-1);if(indeg.get(o)===0)q.push(o)}}for(const id of ids)if(!layer.has(id))layer.set(id,0);return layer}
+function layoutLayered(g,comp){const ids=comp.ids;const layer=layerAssign(g,ids);const byL=new Map();for(const id of ids){const L=layer.get(id);if(!byL.has(L))byL.set(L,[]);byL.get(L).push(id)}const Ls=[...byL.keys()].sort((a,b)=>a-b);const pos=new Map();const key=id=>{const n=g.nodes.get(id);return(n.block||0)*1e6+(n.gpos||0)};for(const L of Ls){const arr=byL.get(L);arr.sort((a,b)=>key(a)-key(b));arr.forEach((id,i)=>pos.set(id,i))}const set=new Set(ids);const sweep=(down)=>{const order=down?Ls:Ls.slice().reverse();for(const L of order){const arr=byL.get(L);const bary=id=>{const n=g.nodes.get(id);const nb=(down?n.in:n.out).filter(x=>set.has(x));if(!nb.length)return pos.get(id);return nb.reduce((s,x)=>s+pos.get(x),0)/nb.length};arr.sort((a,b)=>bary(a)-bary(b)||key(a)-key(b));arr.forEach((id,i)=>pos.set(id,i))}};sweep(!0);sweep(!1);sweep(!0);let rows=0;const xy=new Map();for(const L of Ls){const arr=byL.get(L);rows=Math.max(rows,arr.length);arr.forEach((id,i)=>xy.set(id,{x:L*GAP.col,y:i*GAP.row}))}return{xy,width:(Ls.length-1)*GAP.col,height:Math.max(0,rows-1)*GAP.row}}
+function layoutTime(g,comp){const ids=comp.ids;const set=new Set(ids);const blocks=[...new Set(ids.map(id=>g.nodes.get(id).block||0))].sort((a,b)=>a-b);const col=new Map(blocks.map((b,i)=>[b,i]));const layer=layerAssign(g,ids);const cx=id=>{const n=g.nodes.get(id);const c=col.get(n.block||0)*2;return n.type==="tx"||n.type==="chain"?c:c+1};const byC=new Map();for(const id of ids){const c=cx(id);if(!byC.has(c))byC.set(c,[]);byC.get(c).push(id)}const pos=new Map();for(const[c,arr]of byC){arr.sort((a,b)=>layer.get(a)-layer.get(b)||(g.nodes.get(a).gpos||0)-(g.nodes.get(b).gpos||0));arr.forEach((id,i)=>pos.set(id,i))}const cs=[...byC.keys()].sort((a,b)=>a-b);for(let it=0;it<2;it++)for(const c of cs){const arr=byC.get(c);const bary=id=>{const n=g.nodes.get(id);const nb=n.in.filter(x=>set.has(x));return nb.length?nb.reduce((s,x)=>s+pos.get(x),0)/nb.length:pos.get(id)};arr.sort((a,b)=>bary(a)-bary(b));arr.forEach((id,i)=>pos.set(id,i))}const xy=new Map();let rows=0,maxC=0;for(const[c,arr]of byC){rows=Math.max(rows,arr.length);maxC=Math.max(maxC,c);arr.forEach((id,i)=>xy.set(id,{x:c*GAP.col*.7,y:i*GAP.row}))}return{xy,width:maxC*GAP.col*.7,height:Math.max(0,rows-1)*GAP.row}}
+function layoutAll(g,mode){const comps=components(g);let y=0,width=0;const xy=new Map();const bands=[];for(const c of comps){const L=mode==="time"?layoutTime(g,c):layoutLayered(g,c);for(const[id,p]of L.xy)xy.set(id,{x:p.x+GAP.pad,y:p.y+y+GAP.band});bands.push({comp:c,y,height:L.height+GAP.band+GAP.pad,width:L.width+GAP.pad*2});width=Math.max(width,L.width+GAP.pad*2);y+=L.height+GAP.band+GAP.pad}return{xy,bands,width:width+GAP.pad,height:y+GAP.pad}}
+
+/* ---------- SVG rendering ---------- */
+function noteRadius(n,maxLog){if(n.value===0n)return 6;const v=Math.log10(Number(n.value)+1);return 8+10*(maxLog>0?v/maxLog:0)}
+function poiArcs(cx,cy,r,pois,lists){const keys=lists.length?lists:(pois?Object.keys(pois):[]);if(!keys.length){return`<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${POI_COL.none}" stroke-width="2" stroke-dasharray="2 3"/>`}const n=keys.length;let s="";keys.forEach((k,i)=>{const st=pois&&pois[k]?pois[k]:"none";const a0=-Math.PI/2+i*2*Math.PI/n+.06,a1=-Math.PI/2+(i+1)*2*Math.PI/n-.06;if(n===1){s+=`<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${POI_COL[st]||POI_COL.none}" stroke-width="3"${st==="none"?' stroke-dasharray="2 3"':""}><title>${esc(k)} : ${esc(POI_FR[st]||st)}</title></circle>`;return}const x0=cx+r*Math.cos(a0),y0=cy+r*Math.sin(a0),x1=cx+r*Math.cos(a1),y1=cy+r*Math.sin(a1);s+=`<path d="M${x0.toFixed(1)} ${y0.toFixed(1)} A${r} ${r} 0 ${a1-a0>Math.PI?1:0} 1 ${x1.toFixed(1)} ${y1.toFixed(1)}" fill="none" stroke="${POI_COL[st]||POI_COL.none}" stroke-width="3"${st==="none"?' stroke-dasharray="2 3"':""}><title>${esc(k)} : ${esc(POI_FR[st]||st)}</title></path>`});return s}
+/* Edge colour: incoming from another address = blue (purple once its POI is valid or submitted),
+   outgoing = green (red while no POI is submitted). Shields and unknown kinds stay grey. */
+const hasPoiStatus=p=>!!(p&&Object.values(p).some(v=>v==="ProofSubmitted"||v==="Valid"));
+function edgeDir(from,to){const txn=(from.type==="tx"||from.type==="chain")?from:((to.type==="tx"||to.type==="chain")?to:null);if(!txn)return"";if(txn.type==="chain"||txn.emitted)return txn.poiSubmitted?" out":" out-nopoi";if(txn.kind==="external"){const note=to.type==="note"?to:(from.type==="note"?from:null);const has=note?hasPoiStatus(note.pois):txn.inPoi;return has?" in-poi":" in"}return""}
+function edgePath(a,b){const dx=Math.max(30,(b.x-a.x)/2);return`M${a.x} ${a.y} C${a.x+dx} ${a.y} ${b.x-dx} ${b.y} ${b.x} ${b.y}`}
+function renderSVG(g,L,opts){
+  opts=opts||{};const lists=g.lists;const notes=[...g.nodes.values()].filter(n=>n.type==="note");let maxLog=0;for(const n of notes)if(n.value>0n)maxLog=Math.max(maxLog,Math.log10(Number(n.value)+1));
+  const maxEdge=Math.max(1,...g.edges.map(e=>e.value?Math.log10(Number(e.value)+1):0));
+  let bands="",edges="",nodes="";
+  L.bands.forEach((b,i)=>{const c=b.comp;const ns=c.nodes;const toks=[...new Set(ns.filter(n=>n.tk).map(n=>n.tk.sym))];const shields=ns.filter(n=>n.type==="note"&&n.origin==="shield");const uns=ns.filter(n=>n.type==="unshield");const txs=ns.filter(n=>n.type==="tx"||n.type==="chain");const worst=ns.filter(n=>n.type==="note"&&n.mine).map(n=>worstPoi(n.pois)).sort((a,b)=>(POI_RANK[b]??-1)-(POI_RANK[a]??-1))[0]||"none";const sumIn=shields.reduce((s,n)=>s+n.value,0n),sumOut=uns.reduce((s,n)=>s+n.value,0n);const dec=shields[0]?shields[0].dec:(uns[0]?uns[0].dec:18);const lab=`Component ${i+1} · ${toks.join("/")||"?"} · ${shields.length} shield (${fmtVal(sumIn,dec,5)}) · ${uns.length} unshield (${fmtVal(sumOut,dec,5)}) · ${txs.length} tx · worst POI: ${POI_FR[worst]||worst}${c.minBlock?" · blocks "+c.minBlock+"–"+c.maxBlock:""}`;bands+=`<g class="band"><rect x="6" y="${b.y+8}" width="${Math.max(L.width,b.width)-12}" height="${b.height-12}" rx="14" fill="${i%2?"rgba(0,0,145,.025)":"rgba(0,0,145,.045)"}"/><text x="18" y="${b.y+30}" class="bandlab">${esc(lab)}</text></g>`});
+  for(const e of g.edges){const a=L.xy.get(e.from),b=L.xy.get(e.to);if(!a||!b)continue;const w=e.value?1+2.5*(Math.log10(Number(e.value)+1)/maxEdge):1;const from=g.nodes.get(e.from),to=g.nodes.get(e.to);const dir=edgeDir(from,to);const cls="edge"+dir+((from.taint||to.taint)?" taint":"")+(e.value==null?" ghost":"");edges+=`<path class="${cls}" data-from="${esc(e.from)}" data-to="${esc(e.to)}" d="${edgePath(a,b)}" stroke-width="${w.toFixed(2)}" marker-end="url(#nxArrow${dir.trim()?"-"+dir.trim():""})"/>`}
+  for(const n of g.nodes.values()){const p=L.xy.get(n.id);if(!p)continue;let body="",lab="",cls="nd "+n.type;if(n.type==="note"){const r=noteRadius(n,maxLog);const col=n.tk.color;const spent=n.spent;cls+=(n.mine?" mine":" ext")+(spent?" spent":" unspent")+(n.dummy?" dummy":"")+(n.taint?" taint":"")+(" o-"+n.origin);const fill=n.mine?col:"#fff";const stroke=n.mine?(spent?"#9a9ab5":"#16161D"):col;body=`<circle class="core" cx="${p.x}" cy="${p.y}" r="${r.toFixed(1)}" fill="${fill}" stroke="${stroke}" stroke-width="${spent?1.2:1.8}"${n.mine?"":' stroke-dasharray="4 3"'}${n.dummy?' stroke-dasharray="2 2"':""}/>`+poiArcs(p.x,p.y,r+4.5,n.pois,lists)+(n.taint?`<circle cx="${p.x}" cy="${p.y}" r="${(r+9).toFixed(1)}" fill="none" stroke="#E1000F" stroke-width="1.5" stroke-dasharray="3 3"/>`:"");if(n.origin==="shield")body+=`<text x="${p.x}" y="${p.y+3.5}" class="glyph" fill="${n.mine?"#fff":col}">S</text>`;else if(n.origin==="fee")body+=`<text x="${p.x}" y="${p.y+3.5}" class="glyph" fill="${col}">f</text>`;else if(n.origin==="change")body+=`<text x="${p.x}" y="${p.y+3.5}" class="glyph" fill="#fff">c</text>`;else if(n.origin==="transfer_out")body+=`<text x="${p.x}" y="${p.y+3.5}" class="glyph" fill="${col}">→</text>`;else if(n.origin==="transfer_in")body+=`<text x="${p.x}" y="${p.y+3.5}" class="glyph" fill="#fff">←</text>`;lab=`${fmtVal(n.value,n.dec,5)} ${n.sym}`;if(opts.labels)body+=`<text x="${p.x}" y="${(p.y+r+16).toFixed(1)}" class="lab">${esc(lab)}</text>`}
+    else if(n.type==="tx"){cls+=" k-"+n.kind+(n.resolved?"":" unresolved")+(n.taint?" taint":"")+(n.fee?" fee":"");if(n.kind==="shield")body=`<rect x="${p.x-9}" y="${p.y-9}" width="18" height="18" rx="4" fill="#E1000F" stroke="#fff" stroke-width="1.5"/><text x="${p.x}" y="${p.y+3.5}" class="glyph" fill="#fff">⤓</text>`;else{const d=13;body=`<polygon points="${p.x},${p.y-d} ${p.x+d},${p.y} ${p.x},${p.y+d} ${p.x-d},${p.y}" fill="${n.kind==="external"?"#f3f3fb":"#fff"}" stroke="${n.kind==="external"?"#9a9ab5":"#000091"}" stroke-width="2"${n.resolved?"":' stroke-dasharray="3 2"'}/>`;if(n.fee)body+=`<circle cx="${p.x+d-2}" cy="${p.y-d+2}" r="4" fill="#B8860B"><title>Broadcaster fee: submitted by a third party</title></circle>`;const st=worstPoi(n.pois);body+=`<circle cx="${p.x-d+2}" cy="${p.y+d-2}" r="4" fill="${POI_COL[st]||POI_COL.none}"><title>Spend POI: ${esc(POI_FR[st]||st)}</title></circle>`}if(opts.labels){lab=n.kind==="shield"?"shield"+(n.txid?" "+short(n.txid,4):""):(n.rid?"rg "+short(n.rid,4):"tx "+short(n.txid||"",4));body+=`<text x="${p.x}" y="${p.y+26}" class="lab tx">${esc(lab)}${n.block?" · #"+n.block:""}</text>`}}
+    else if(n.type==="unshield"){cls+=(n.taint?" taint":"");body=`<rect x="${p.x-16}" y="${p.y-11}" width="32" height="22" rx="7" fill="#fff" stroke="#000091" stroke-width="1.8"/><text x="${p.x}" y="${p.y+4}" class="glyph" fill="#000091">→ 0x</text>`+(n.pois?`<circle cx="${p.x+14}" cy="${p.y-10}" r="4" fill="${POI_COL[worstPoi(n.pois)]||POI_COL.none}"/>`:"");if(opts.labels)body+=`<text x="${p.x}" y="${p.y+26}" class="lab">${esc(fmtVal(n.value,n.dec,5)+" "+n.sym)} → ${esc(short(n.to||"",3))}</text>`}
+    else if(n.type==="ghost"){body=`<circle cx="${p.x}" cy="${p.y}" r="9" fill="#fff" stroke="#9a9ab5" stroke-width="1.5" stroke-dasharray="3 2"/><text x="${p.x}" y="${p.y+3.5}" class="glyph" fill="#6a6a8a">${n.n}</text>`;if(opts.labels)body+=`<text x="${p.x}" y="${p.y+24}" class="lab ghost">${n.dir==="in"?"third-party input(s)":"undecrypted output(s)"}</text>`}
+    else if(n.type==="chain"){cls+=(n.taint?" taint":"");body=`<rect x="${p.x-22}" y="${p.y-11}" width="44" height="22" rx="11" fill="#f3f3fb" stroke="#000091" stroke-width="1.6" stroke-dasharray="4 2"/><text x="${p.x}" y="${p.y+4}" class="glyph" fill="#000091">⟳ ${n.n}</text>`;if(opts.labels)body+=`<text x="${p.x}" y="${p.y+26}" class="lab">${n.n} change hops${n.side?" · "+n.side+" side output(s)":""}</text>`}
+    nodes+=`<g class="${cls}" data-id="${esc(n.id)}" tabindex="0">${body}</g>`}
+  const W=Math.max(400,L.width),H=Math.max(200,L.height);
+  const markers=[["","#9a9ab5"],["-in","#000091"],["-in-poi","#6A2DA8"],["-out","#0F6E56"],["-out-nopoi","#E1000F"]].map(([s,c])=>`<marker id="nxArrow${s}" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5 0 10z" fill="${c}"/></marker>`).join("");
+  return{svg:`<defs>${markers}</defs><g id="nxView">${bands}<g class="edges">${edges}</g><g class="nodes">${nodes}</g></g>`,width:W,height:H};
+}
+
+/* ---------- tab state ---------- */
+const S={snap:null,graph:null,view:null,layout:null,sel:null,filters:{token:"",poi:"any",spent:!0,external:!0,collapse:!1,labels:!0,mode:"layered"},tf:{x:0,y:0,k:1},loading:!1,lastLoad:0,opened:!1,err:null};
+
+function setStatus(msg,err){const e=$("nxStatus");if(!e)return;e.textContent=msg||"";e.classList.toggle("err",!!err)}
+function api(){return window.noxaku||null}
+
+async function refresh(force){
+  if(S.loading){S.again=!0;return}const a=api();
+  if(!a){setStatus("Engine not loaded: window.noxaku missing.",!0);return}
+  if(!a.ready()){setStatus("No wallet loaded yet.",!0);$("nxCanvas")&&($("nxCanvas").innerHTML="");return}
+  if(!force&&S.snap&&Date.now()-S.lastLoad<15000){draw();return}
+  S.loading=!0;setStatus("Reading engine state…");const t0=Date.now();
+  try{S.snap=await a.notes({});S.lastLoad=Date.now();S.graph=buildGraph(S.snap,{});fillTokens();draw();setStatus("Snapshot "+new Date(S.lastLoad).toLocaleTimeString("en-GB")+" · "+(Date.now()-t0)+" ms")}
+  catch(x){S.err=x;setStatus("Error: "+(x&&x.message||x),!0);console.error(x)}
+  finally{S.loading=!1;if(S.again){S.again=!1;setTimeout(()=>refresh(!0),300)}}
+}
+function fillTokens(){const sel=$("nxTok");if(!sel||!S.graph)return;const cur=sel.value;sel.innerHTML='<option value="">All tokens</option>'+[...S.graph.tokens.values()].map(t=>`<option value="${esc(t.key)}">${esc(t.sym)}</option>`).join("");if([...S.graph.tokens.keys()].includes(cur))sel.value=cur;else S.filters.token=""}
+function currentView(){let v=subgraph(S.graph,S.filters);if(S.filters.collapse)v=collapseChains(v);return v}
+function draw(keepTf){
+  const cv=$("nxCanvas");if(!cv||!S.graph)return;
+  S.view=currentView();S.layout=layoutAll(S.view,S.filters.mode);
+  const r=renderSVG(S.view,S.layout,{labels:S.filters.labels});
+  cv.innerHTML=`<svg id="nxSvg" xmlns="${NS}" width="100%" height="100%" viewBox="0 0 ${r.width} ${r.height}" preserveAspectRatio="xMinYMin meet" style="touch-action:none">${r.svg}</svg>`;
+  S.svgW=r.width;S.svgH=r.height;
+  if(!keepTf)fit();else applyTf();
+  bindSvg();renderStats();renderAnomalies();if(S.sel&&S.view.nodes.has(S.sel))markSel(S.sel);else{S.sel=null;renderDetail(null)}
+}
+function applyTf(){const v=document.getElementById("nxView");if(v)v.setAttribute("transform",`translate(${S.tf.x} ${S.tf.y}) scale(${S.tf.k})`)}
+function fit(){const cv=$("nxCanvas");if(!cv)return;const bw=cv.clientWidth||800,bh=cv.clientHeight||500;const k=Math.min(1.6,Math.max(.15,Math.min(bw/(S.svgW+20),bh/(S.svgH+20))));const svg=document.getElementById("nxSvg");if(svg){svg.setAttribute("viewBox",`0 0 ${bw} ${bh}`)}S.tf={x:10,y:10,k};applyTf()}
+function bindSvg(){
+  const cv=$("nxCanvas"),svg=document.getElementById("nxSvg");if(!svg)return;
+  let drag=null;
+  svg.addEventListener("pointerdown",e=>{if(e.button!==0)return;const g=e.target.closest&&e.target.closest("g.nd");drag={x:e.clientX,y:e.clientY,tx:S.tf.x,ty:S.tf.y,moved:!1,target:g?g.dataset.id:null};try{svg.setPointerCapture(e.pointerId)}catch(_){}});
+  svg.addEventListener("pointermove",e=>{if(!drag)return;const dx=e.clientX-drag.x,dy=e.clientY-drag.y;if(Math.abs(dx)+Math.abs(dy)>3)drag.moved=!0;S.tf.x=drag.tx+dx;S.tf.y=drag.ty+dy;applyTf()});
+  svg.addEventListener("pointerup",e=>{if(!drag)return;const{moved,target}=drag;drag=null;if(moved)return;select(target||null)});
+  svg.addEventListener("pointercancel",()=>{drag=null});
+  svg.addEventListener("wheel",e=>{e.preventDefault();const rect=svg.getBoundingClientRect();const mx=e.clientX-rect.left,my=e.clientY-rect.top;const f=Math.exp(-e.deltaY*.0015);const k=Math.min(6,Math.max(.08,S.tf.k*f));const q=k/S.tf.k;S.tf.x=mx-(mx-S.tf.x)*q;S.tf.y=my-(my-S.tf.y)*q;S.tf.k=k;applyTf()},{passive:!1});
+  svg.addEventListener("mouseover",e=>{const g=e.target.closest&&e.target.closest("g.nd");if(g)highlight(g.dataset.id)});
+  svg.addEventListener("mouseout",e=>{const g=e.target.closest&&e.target.closest("g.nd");if(g)highlight(null)});
+  svg.addEventListener("keydown",e=>{if(e.key==="Enter"){const g=e.target.closest&&e.target.closest("g.nd");if(g)select(g.dataset.id)}});
+}
+function lineage(id){const v=S.view;const up=new Set(),down=new Set();const walk=(start,dir,acc)=>{const q=[start];while(q.length){const x=q.shift();const n=v.nodes.get(x);if(!n)continue;for(const y of(dir==="up"?n.in:n.out))if(!acc.has(y)){acc.add(y);q.push(y)}}};walk(id,"up",up);walk(id,"down",down);return{up,down}}
+function highlight(id){const svg=document.getElementById("nxSvg");if(!svg)return;if(!id){svg.classList.remove("hl");svg.querySelectorAll(".lit").forEach(x=>x.classList.remove("lit"));return}const{up,down}=lineage(id);const set=new Set([id,...up,...down]);svg.classList.add("hl");svg.querySelectorAll("g.nd").forEach(x=>x.classList.toggle("lit",set.has(x.dataset.id)));svg.querySelectorAll("path.edge").forEach(x=>x.classList.toggle("lit",set.has(x.dataset.from)&&set.has(x.dataset.to)))}
+function markSel(id){const svg=document.getElementById("nxSvg");if(!svg)return;svg.querySelectorAll("g.nd.sel").forEach(x=>x.classList.remove("sel"));if(id){const g=svg.querySelector(`g.nd[data-id="${CSS.escape(id)}"]`);if(g)g.classList.add("sel")}}
+function select(id,center){S.sel=id;markSel(id);renderDetail(id?S.view.nodes.get(id):null);if(id&&center){const p=S.layout.xy.get(id);const cv=$("nxCanvas");if(p&&cv){S.tf.x=(cv.clientWidth||800)/2-p.x*S.tf.k;S.tf.y=(cv.clientHeight||500)/2-p.y*S.tf.k;applyTf()}}}
+function centerOn(id){select(id,!0)}
+
+/* ---------- panels ---------- */
+const row=(k,v,cls)=>`<div class="nx-row${cls?" "+cls:""}"><div class="nx-k">${esc(k)}</div><div class="nx-v">${v}</div></div>`;
+const mono=s=>`<code>${esc(s)}</code>`;
+const link=(hash)=>{const ex=S.snap&&S.snap.explorer;return hash?(ex?`<a href="${esc(ex+hash)}" target="_blank" rel="noreferrer">${esc(short(hash,8))}</a>`:mono(short(hash,8))):"—"};
+const sens=s=>s?`<span class="sensitive nx-sens" title="hold to reveal"><code>${esc(s)}</code></span>`:"—";
+const poisHtml=p=>{if(!p)return`<span class="poi-chip none">${POI_FR.none}</span>`;return Object.entries(p).map(([k,v])=>`<span class="poi-chip ${esc(v)}" title="${esc(k)}">${esc(short(k,4))} · ${esc(POI_FR[v]||v)}</span>`).join(" ")};
+const nodeLink=(id,label)=>`<a href="#" class="nx-go" data-go="${esc(id)}">${esc(label)}</a>`;
+function renderDetail(n){
+  const el=$("nxDetail");if(!el)return;
+  if(!n){el.innerHTML='<div class="nx-empty">Select a note, a transaction or an anomaly.</div>';return}
+  let h="";
+  if(n.type==="note"){h+=`<h3>Note <code>${esc(short(n.hash,6))}</code></h3>`;h+=row("Value",`<b>${esc(fmtVal(n.value,n.dec,n.dec))} ${esc(n.sym)}</b> <span class="nx-dim">(${esc(n.value.toString())} units)</span>`);h+=row("Origin",esc(ORIGIN_FR[n.origin]||n.origin));h+=row("State",`<span class="bk ${esc(n.bucket)}">${esc(BUCKET_FR[n.bucket]||n.bucket)}</span>${n.spent?" · spent in "+nodeLink(n.spentBy,short((S.view.nodes.get(n.spentBy)||{}).rid||n.spendtxid,6)):""}`);h+=row("POI per list",poisHtml(n.pois));if(n.sentPois&&n.sentPois!==n.pois)h+=row("POI (sender side)",poisHtml(n.sentPois));h+=row("Position",`tree ${n.tree==null?"?":n.tree} · leaf ${n.position==null?"?":n.position} · global ${n.gpos==null?"?":n.gpos}`);h+=row("Type",esc(n.ctype||"?"));h+=row("Block / date",`${n.block||"?"} · ${fmtTs(n.ts)}`);h+=row("Creating tx",link(n.createdTx)+(n.createdRid?" · rg "+mono(short(n.createdRid,6)):""));if(n.spent)h+=row("Spending tx",link(n.spendtxid)+(n.spendUnresolved?' <span class="nx-warn">not resolved in the txid tree</span>':""));h+=row("Hash (commitment)",mono(n.hash));h+=row("Nullifier",n.nullifier?mono(n.nullifier):"—");h+=row("Blinded commitment",n.blinded?mono(n.blinded):"—");h+=row("NPK",n.npk?mono(n.npk):"—");h+=row("Random",sens(n.random),"nx-sensrow");if(n.memo)h+=row("Memo",esc(n.memo));if(n.sender)h+=row("Sender (0zk)",mono(n.sender));if(n.recipient)h+=row("Recipient (0zk)",mono(n.recipient));if(n.shieldFee&&n.shieldFee!=="0")h+=row("Shield fee",esc(n.shieldFee));h+=row("Ownership",(n.mine?"received by this wallet":"not received")+(n.sentByMe?" · created by this wallet":""));if(n.taint)h+=row("Taint",'<span class="nx-warn">downstream of a blocked note</span>');const parent=n.parent&&S.view.nodes.get(n.parent);if(parent)h+=row("Created by",nodeLink(parent.id,parent.kind==="shield"?"shield "+short(parent.txid,4):"tx "+short(parent.rid||parent.txid,6)))}
+  else if(n.type==="tx"){h+=`<h3>${n.kind==="shield"?"Shield":n.kind==="external"?"Third-party tx":"Railgun transaction"} <code>${esc(short(n.rid||n.txid||"",6))}</code></h3>`;h+=row("Chain tx",link(n.txid));if(n.rid)h+=row("Railgun txid",mono(n.rid));h+=row("Block / date",`${n.block||"?"} · ${fmtTs(n.ts)}`);h+=row("Resolution",n.resolved?"txid tree":'<span class="nx-warn">unresolved (TXID tree)</span>');h+=row("Broadcast",n.fee?"third-party broadcaster (fee output present)":(n.kind==="shield"?"self (EOA)":"probably self-broadcast (no fee output)"));if(n.kind!=="shield")h+=row("Spend POI",poisHtml(n.pois));const ins=n.inputs.map(i=>S.view.nodes.get(i)).filter(Boolean),outs=n.outputs.map(i=>S.view.nodes.get(i)).filter(Boolean);const li=x=>x.type==="note"?nodeLink(x.id,fmtVal(x.value,x.dec,5)+" "+x.sym+" "+short(x.hash,4)):x.type==="unshield"?nodeLink(x.id,"unshield "+fmtVal(x.value,x.dec,5)+" "+x.sym):x.type==="ghost"?nodeLink(x.id,x.n+" "+(x.dir==="in"?"third-party input(s)":"undecrypted")):esc(x.id);h+=row("Inputs ("+ins.length+")",ins.length?ins.map(li).join("<br>"):"—");h+=row("Outputs ("+outs.length+")",outs.length?outs.map(li).join("<br>"):"—");if(n.valIn&&n.valIn.size){h+=row("Balance",[...n.valIn].map(([k,v])=>{const o=n.valOut.get(k)||0n;const t=S.view.tokens.get(k);const d=(ins[0]&&ins[0].dec)||18;return esc(t?t.sym:k)+" : "+esc(fmtVal(v,d,6))+" → "+esc(fmtVal(o,d,6))+(v===o?" ✓":(n.resolved&&!n.unknownIn&&!n.unknownOut?' <span class="nx-warn">≠</span>':" (partial)"))}).join("<br>"))}if(n.resolved&&n.kind!=="shield"){h+=row("Nullifiers ("+n.nullifiers.length+")",n.nullifiers.map(x=>{const mine=ins.find(i=>i.nullifier===x);return mono(short(x,8))+(mine?" ✓ my note":" · third party")}).join("<br>")||"—");h+=row("Commitments ("+n.commitments.length+")",n.commitments.map(x=>{const o=outs.find(i=>i.hash===x);return mono(short(x,8))+(o?(o.mine?" ✓ my note":" · sent"):" · undecrypted")}).join("<br>")||"—");if(n.unshieldInfo)h+=row("Unshield (bound params)",`${esc(fmtVal(n.unshieldInfo.value,(outs.find(o=>o.type==="unshield")||{}).dec||18,6))} → ${mono(n.unshieldInfo.to||"?")}`);h+=row("boundParamsHash",n.bound?mono(n.bound):"—");h+=row("verificationHash",n.vhash?mono(n.vhash):"—");if(n.treeIn!=null)h+=row("Trees",`in ${n.treeIn} → out ${n.treeOut} (batch at ${n.batchStart})`)}}
+  else if(n.type==="unshield"){h+=`<h3>Unshield → public</h3>`;h+=row("Amount",`<b>${esc(fmtVal(n.value,n.dec,n.dec))} ${esc(n.sym)}</b>`+(n.fee!=null?` · fee ${esc(fmtVal(n.fee,n.dec,n.dec))}`:""));h+=row("Recipient",mono(n.to||"?"));h+=row("Chain tx",link(n.txid));if(n.rid)h+=row("Railgun txid",mono(n.rid));h+=row("Block / date",`${n.block||"?"} · ${fmtTs(n.ts)}`);h+=row("POI",poisHtml(n.pois));if(n.fromTree)h+=row("Source","txid-tree bound params (no stored unshield event)")}
+  else if(n.type==="ghost"){h+=`<h3>${n.dir==="in"?"Third-party inputs":"Undecrypted outputs"} (${n.n})</h3>`;h+=row("Chain tx",link(n.txid));h+=row(n.dir==="in"?"Nullifiers":"Commitments",n.items.map(x=>mono(short(x,8))).join("<br>"));h+=row("Reading",n.dir==="in"?"These inputs belong to another wallet (receipt from a third party).":"Outputs encrypted for a third party, or padding notes: this wallet's viewing key does not open them.")}
+  else if(n.type==="chain"){h+=`<h3>Collapsed change chain (${n.n} hops)</h3>`;h+=row("Blocks",`${n.block||"?"} → ${n.blockEnd||"?"}`);h+=row("Side outputs",n.side?n.side+" (fees / third parties / padding)":"none");h+=row("Collapsed txs",n.hops.map(x=>mono(short(x,6))).join("<br>"));h+=row("Tip","untick “collapse change chains” to expand them")}
+  const rel=S.graph.anomalies.filter(a=>a.nodes.includes(n.id));if(rel.length)h+=row("Anomalies",rel.map(a=>`<span class="an-chip ${a.sev}">${esc(a.code)}</span> ${esc(a.msg)}`).join("<br>"));
+  el.innerHTML=h;
+  el.querySelectorAll(".nx-go").forEach(a=>a.onclick=e=>{e.preventDefault();centerOn(a.dataset.go)});
+  el.querySelectorAll(".nx-sens").forEach(x=>{const on=()=>x.classList.add("revealed"),off=()=>x.classList.remove("revealed");x.addEventListener("mousedown",on);x.addEventListener("touchstart",on,{passive:!0});["mouseup","mouseleave","touchend"].forEach(ev=>x.addEventListener(ev,off))});
+}
+function renderStats(){const el=$("nxStats");if(!el||!S.graph)return;const all=[...S.graph.nodes.values()];const mine=all.filter(n=>n.type==="note"&&n.mine);const un=mine.filter(n=>!n.spent),sp=mine.filter(n=>n.spent);const txs=all.filter(n=>n.type==="tx"&&n.kind!=="shield");const sh=all.filter(n=>n.type==="tx"&&n.kind==="shield");const us=all.filter(n=>n.type==="unshield");const ext=all.filter(n=>n.type==="note"&&!n.mine);const bal=new Map();for(const n of un){const k=n.tk.key;if(!bal.has(k))bal.set(k,{sym:n.sym,dec:n.dec,v:0n,spendable:0n});const b=bal.get(k);b.v+=n.value;if(n.bucket==="Spendable")b.spendable+=n.value}const high=S.graph.anomalies.filter(a=>a.sev==="high").length,warn=S.graph.anomalies.filter(a=>a.sev==="warn").length;const vis=S.view?S.view.nodes.size:0;el.innerHTML=[["notes received",mine.length],["unspent",un.length],["spent",sp.length],["sent to others",ext.length],["shields",sh.length],["tx",txs.length],["unshields",us.length],["POI lists",S.graph.lists.length||"?"],["shown",vis]].map(([k,v])=>`<div class="st"><b>${esc(v)}</b><span>${esc(k)}</span></div>`).join("")+[...bal.values()].map(b=>`<div class="st tok"><b>${esc(fmtVal(b.v,b.dec,5))}</b><span>${esc(b.sym)} in notes · ${esc(fmtVal(b.spendable,b.dec,5))} spendable</span></div>`).join("")+`<div class="st ${high?"high":warn?"warn":""}"><b>${high+warn}</b><span>anomalies · ${high} high</span></div>`}
+function renderAnomalies(){const el=$("nxAnom");if(!el||!S.graph)return;const A=S.graph.anomalies.slice().sort((a,b)=>({high:0,warn:1,info:2}[a.sev]-{high:0,warn:1,info:2}[b.sev]));if(!A.length){el.innerHTML='<div class="nx-empty">No anomaly detected on this snapshot.</div>';return}el.innerHTML=A.map((a,i)=>`<div class="an ${a.sev}" data-i="${i}"><span class="an-chip ${a.sev}">${esc(a.code)}</span><span class="an-msg">${esc(a.msg)}</span><span class="an-n">${a.nodes.length}</span></div>`).join("");el.querySelectorAll(".an").forEach(d=>d.onclick=()=>{const a=A[+d.dataset.i];const target=a.nodes.find(id=>S.view.nodes.has(id));if(target)centerOn(target);else setStatus("Node hidden by the current filters (widen them).",!0)})}
+
+/* ---------- exports ---------- */
+const jsonSafe=(k,v)=>typeof v==="bigint"?v.toString():(v instanceof Map?Object.fromEntries(v):(v instanceof Set?[...v]:v));
+function exportJSON(){if(!S.graph)return;const nodes=[...S.graph.nodes.values()].map(n=>{const o=Object.assign({},n);delete o.tk;o.token=n.tk?n.tk.key:o.token;return o});const out={format:"noxaku-notes-graph",version:1,generatedAt:new Date().toISOString(),snapshot:Object.assign({},S.snap,{received:S.snap.received.map(r=>Object.assign({},r,{random:"[redacted]"})),sent:S.snap.sent.map(r=>Object.assign({},r,{random:"[redacted]"}))}),graph:{nodes:nodes.map(n=>{const c=Object.assign({},n);if(c.random)c.random="[redacted]";return c}),edges:S.graph.edges,anomalies:S.graph.anomalies,lists:S.graph.lists}};dl(new Blob([JSON.stringify(out,jsonSafe,2)],{type:"application/json"}),"noxaku-notes-"+ts()+".json")}
+function exportSVG(){const svg=document.getElementById("nxSvg");if(!svg)return;const css=`<style>${SVG_CSS}</style>`;const clone=svg.cloneNode(!0);clone.setAttribute("viewBox",`0 0 ${S.svgW+20} ${S.svgH+20}`);clone.removeAttribute("style");clone.querySelector("#nxView").setAttribute("transform","translate(10 10)");const s='<?xml version="1.0" encoding="UTF-8"?>'+clone.outerHTML.replace("<defs>",css+"<defs>");dl(new Blob([s],{type:"image/svg+xml"}),"noxaku-notes-"+ts()+".svg")}
+function dl(blob,name){const u=URL.createObjectURL(blob),a=document.createElement("a");a.href=u;a.download=name;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(u),8000)}
+const ts=()=>new Date().toISOString().replace(/[:T]/g,"-").slice(0,19);
+const SVG_CSS=`.edge{fill:none;stroke:#9a9ab5;opacity:.85}.edge.ghost{stroke-dasharray:3 3}.edge.in{stroke:#000091}.edge.in-poi{stroke:#6A2DA8}.edge.out{stroke:#0F6E56}.edge.out-nopoi{stroke:#E1000F}.edge.taint{stroke-dasharray:5 3}.lab{font:10px 'JetBrains Mono',ui-monospace,monospace;fill:#3a3a52;text-anchor:middle}.lab.tx{fill:#000091}.lab.ghost{fill:#8a8aa5}.glyph{font:700 10px 'Inter',system-ui,sans-serif;text-anchor:middle;pointer-events:none}.bandlab{font:600 11px 'Inter',system-ui,sans-serif;fill:#55557a}`;
+
+/* ---------- search ---------- */
+function search(q){if(!S.view)return;q=(q||"").trim().toLowerCase();if(!q)return;const hit=[...S.view.nodes.values()].find(n=>[n.id,n.hash,n.txid,n.rid,n.createdTx,n.spendtxid,n.nullifier,n.blinded,n.to].filter(Boolean).some(x=>String(x).toLowerCase().includes(q)));if(hit)centerOn(hit.id);else setStatus("No node matches “"+q+"” (check the filters).",!0)}
+
+/* ---------- mounting ---------- */
+function bindUI(){
+  const on=(id,ev,fn)=>{const e=$(id);if(e)e.addEventListener(ev,fn)};
+  on("nxRefresh","click",()=>refresh(!0));
+  on("nxSync","click",()=>{const b=$("sync");if(b){b.click();setStatus("Sync started; the graph refreshes when it completes.")}else setStatus("Sync button not found.",!0)});
+  on("nxFit","click",()=>fit());
+  on("nxJson","click",exportJSON);on("nxSvgExp","click",exportSVG);
+  on("nxTok","change",e=>{S.filters.token=e.target.value;draw()});
+  on("nxPoi","change",e=>{S.filters.poi=e.target.value;draw()});
+  on("nxMode","change",e=>{S.filters.mode=e.target.value;draw()});
+  [["nxSpent","spent"],["nxExt","external"],["nxCollapse","collapse"],["nxLabels","labels"]].forEach(([id,k])=>on(id,"change",e=>{S.filters[k]=e.target.checked;draw()}));
+  on("nxSearch","keydown",e=>{if(e.key==="Enter")search(e.target.value)});
+  on("nxSearchBtn","click",()=>search(($("nxSearch")||{}).value));
+  const ro=window.ResizeObserver?new ResizeObserver(()=>{if(S.opened&&document.getElementById("nxSvg"))applyTf()}):null;if(ro&&$("nxCanvas"))ro.observe($("nxCanvas"));
+  // automatic refresh after sync / POI
+  let tmr=null;const obs=new MutationObserver(()=>{if(!S.opened)return;const v=$("notes");if(!v||!v.classList.contains("show"))return;clearTimeout(tmr);tmr=setTimeout(()=>refresh(!0),1800)});
+  ["shielded","shieldedAll","poiStatusOut"].forEach(id=>{const e=$(id);if(e)obs.observe(e,{childList:!0,characterData:!0,subtree:!0})});
+}
+function open(){S.opened=!0;if(!S.bound){bindUI();S.bound=!0}refresh(!1);setTimeout(()=>{if(document.getElementById("nxSvg"))fit()},50)}
+if(document.readyState==="complete")setTimeout(()=>{if(!S.bound){bindUI();S.bound=!0}},0);else window.addEventListener("load",()=>{if(!S.bound){bindUI();S.bound=!0}});
+window.NoxakuNotes={open,refresh:()=>refresh(!0),select:centerOn,state:S,_pure:{buildGraph,subgraph,collapseChains,components,layoutAll,renderSVG,fmtVal,bucketOf,worstPoi}};
+})();
+</script>
+<script>/*vw-keysrc-0.2.15*/(function(){
+var $=function(i){return document.getElementById(i)};
+var sel=$("vwMode"),mn=$("vwMnemonic"),vk=$("vwViewing");if(!sel||!mn||!vk)return;
+var VA="viewing+address";
+function opt(v){for(var i=0;i<sel.options.length;i++)if(sel.options[i].value===v)return sel.options[i];return null}
+var mo=opt("mnemonic");
+if(!opt(VA)){var o=new Option("Private viewing key + 0zk address",VA);if(mo&&mo.nextSibling)sel.insertBefore(o,mo.nextSibling);else sel.add(o)}
+var vo=null;for(var i=0;i<sel.options.length;i++){var x=sel.options[i];if(x.value!=="mnemonic"&&x.value!==VA){vo=x;break}}
+if(!vo){vo=new Option("Private viewing key only (on-chain scan)","viewing");sel.add(vo)}
+[opt(VA),vo].forEach(function(x){x.disabled=false;x.hidden=false});
+var inLabel=vk.closest("label"),lab=$("vwAddressLabel"),inp=$("vwAddress");
+if(!inp){lab=document.createElement("label");lab.id="vwAddressLabel";
+ if(inLabel){lab.className=inLabel.className}else{var p=vk.previousElementSibling;if(p&&p.tagName==="LABEL")lab.className=p.className}
+ inp=document.createElement("input");inp.id="vwAddress";inp.type="text";inp.className=vk.className;
+ inp.spellcheck=false;inp.autocomplete="off";inp.setAttribute("autocapitalize","off");
+ inp.placeholder="0zk1\u2026 (address of this viewing key)";
+ lab.textContent="0zk address";lab.htmlFor="vwAddress";
+ if(inLabel){lab.appendChild(inp);inLabel.insertAdjacentElement("afterend",lab)}
+ else{vk.insertAdjacentElement("afterend",lab);lab.insertAdjacentElement("afterend",inp)}}
+var bm=mn.closest(".vw-key"),bv=vk.closest(".vw-key")||vk.parentElement;if(bm===bv)bm=null;
+var hint=$("vwKeyHint");
+var H1="The master public key is read from the 0zk address and checked against the viewing key (no scan).";
+var H2="The master public key is recovered from the first transfer received in clear (full scan on the first load, then cached in the database).";
+function show(el,on){if(!el)return;if(el.hidden===on)el.hidden=!on;var d=on?"":"none";if(el.style.display!==d)el.style.display=d}
+var last=null;
+function sync(){var m=sel.value;last=m;var isMn=m==="mnemonic",isVA=m===VA;
+ show(bm,isMn);show(bv,!isMn);show(lab,isVA);if(!inLabel)show(inp,isVA);
+ if(hint){var t=isVA?H1:H2;if(hint.textContent!==t)hint.textContent=t}}
+sel.addEventListener("change",function(){sync();setTimeout(sync,0)});
+var net=$("vwNet");if(net)net.addEventListener("change",function(){setTimeout(sync,0);setTimeout(sync,200)});
+setInterval(function(){if(sel.value!==last)sync()},300);
+if(typeof MutationObserver!=="undefined"){var ob=new MutationObserver(function(){var m=sel.value;
+ if((bv&&bv.hidden!==(m==="mnemonic"))||(bm&&bm.hidden!==(m!=="mnemonic")))sync()});
+ [bm,bv].forEach(function(b){if(b)ob.observe(b,{attributes:true,attributeFilter:["hidden","style"]})})}
+document.addEventListener("DOMContentLoaded",function(){setTimeout(sync,0)});
+window.addEventListener("load",function(){setTimeout(sync,0)});
+sync();
+})();</script>
+</body>
+</html>

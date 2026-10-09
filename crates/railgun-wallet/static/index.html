@@ -1,0 +1,845 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Railgun wallet</title>
+<style>
+:root {
+  --paper: #e8edf1;
+  --panel: #f6f8fa;
+  --ink: #13212d;
+  --steel: #4d6579;
+  --line: #c3ced8;
+  --shielded: #0d6e6e;
+  --pending: #a86a12;
+  --fail: #ad3327;
+  --focus: #1f5fbf;
+  --mono: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace;
+  --sans: "IBM Plex Sans", "Segoe UI", "Helvetica Neue", system-ui, sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --paper: #121c25;
+    --panel: #1a2732;
+    --ink: #dfe7ee;
+    --steel: #93a8ba;
+    --line: #2f4151;
+    --shielded: #4fc4bd;
+    --pending: #e0a84e;
+    --fail: #ef7d6f;
+    --focus: #7fb0ff;
+  }
+}
+* { box-sizing: border-box; }
+html { font-size: 15px; }
+body {
+  margin: 0; background: var(--paper); color: var(--ink);
+  font-family: var(--sans); line-height: 1.45;
+  font-variant-numeric: tabular-nums;
+}
+button, input, select, textarea { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+[hidden] { display: none !important; }
+
+header.bar {
+  display: flex; flex-wrap: wrap; gap: .75rem 1.5rem; align-items: baseline;
+  padding: .9rem 1.5rem; border-bottom: 1px solid var(--line);
+}
+header.bar h1 { font-size: 1.15rem; font-weight: 600; margin: 0; letter-spacing: -.01em; }
+header.bar .meta { color: var(--steel); font-size: .87rem; }
+header.bar .spacer { flex: 1; }
+
+main { padding: 1.25rem 1.5rem 3rem; max-width: 1280px; margin: 0 auto; }
+.layout { display: grid; grid-template-columns: minmax(300px, 5fr) minmax(340px, 7fr); gap: 1.5rem; align-items: start; }
+@media (max-width: 860px) { .layout { grid-template-columns: 1fr; } }
+
+section { background: var(--panel); border: 1px solid var(--line); border-radius: 3px; padding: 1rem 1.1rem; margin-bottom: 1.25rem; }
+section > h2 { font-size: .95rem; font-weight: 600; margin: 0 0 .7rem; }
+p.hint { color: var(--steel); font-size: .85rem; margin: .35rem 0 0; max-width: 68ch; }
+
+/* The rail: public side on the left, shielded side on the right. */
+.rail { display: grid; grid-template-columns: 1fr auto 1fr; gap: .8rem; align-items: stretch; margin-bottom: 1.25rem; }
+.rail .side { background: var(--panel); border: 1px solid var(--line); border-radius: 3px; padding: .8rem 1rem; min-width: 0; }
+.rail .side.shielded { border-left: 4px solid var(--shielded); }
+.rail .side h2 { font-size: .85rem; font-weight: 600; margin: 0 0 .3rem; color: var(--steel); }
+.rail .track { display: flex; flex-direction: column; justify-content: center; gap: .3rem; color: var(--steel); font-size: .8rem; text-align: center; min-width: 5.5rem; }
+.rail .track .lane { border-top: 2px solid var(--line); padding-top: .2rem; }
+.rail .track .lane.on { border-color: var(--shielded); color: var(--ink); font-weight: 600; }
+@media (max-width: 860px) { .rail { grid-template-columns: 1fr; } .rail .track { flex-direction: row; justify-content: space-around; } }
+.addr { font-family: var(--mono); font-size: .8rem; word-break: break-all; }
+
+label { display: block; font-size: .85rem; color: var(--steel); margin: .7rem 0 .2rem; }
+input[type=text], input[type=password], input[type=number], select, textarea {
+  width: 100%; padding: .45rem .55rem; background: var(--paper);
+  border: 1px solid var(--line); border-radius: 3px;
+}
+textarea { min-height: 4.2rem; resize: vertical; font-family: var(--mono); font-size: .85rem; }
+.row { display: grid; grid-template-columns: 1fr 1fr; gap: .8rem; }
+.check { display: flex; gap: .5rem; align-items: center; margin-top: .8rem; color: var(--ink); font-size: .9rem; }
+.check input { width: auto; }
+
+button {
+  padding: .45rem .9rem; border-radius: 3px; border: 1px solid var(--ink);
+  background: var(--ink); color: var(--paper); cursor: pointer; font-weight: 500;
+}
+button.quiet { background: transparent; color: var(--ink); border-color: var(--line); }
+button:disabled { opacity: .45; cursor: not-allowed; }
+.actions { margin-top: 1rem; display: flex; gap: .6rem; align-items: center; flex-wrap: wrap; }
+
+.tabs { display: flex; gap: 0; border-bottom: 1px solid var(--line); margin: 0 0 .9rem; flex-wrap: wrap; }
+.tabs button {
+  background: transparent; color: var(--steel); border: 0; border-bottom: 2px solid transparent;
+  border-radius: 0; padding: .45rem .9rem; margin-bottom: -1px;
+}
+.tabs button[aria-selected=true] { color: var(--ink); border-bottom-color: var(--ink); font-weight: 600; }
+.tabs button.off { color: var(--steel); }
+.tabs button.off::after { content: " (unavailable)"; font-size: .78rem; }
+.diag { border-left: 4px solid var(--pending); padding: .5rem .8rem; margin-top: .6rem; font-size: .88rem; background: var(--paper); }
+.diag code { font-family: var(--mono); font-size: .8rem; word-break: break-all; }
+
+table { width: 100%; border-collapse: collapse; font-size: .88rem; }
+th { text-align: left; font-weight: 500; color: var(--steel); padding: .25rem .5rem .25rem 0; border-bottom: 1px solid var(--line); }
+td { padding: .35rem .5rem .35rem 0; border-bottom: 1px solid var(--line); vertical-align: top; }
+td.num, th.num { text-align: right; }
+.tag { font-size: .78rem; padding: .05rem .4rem; border-radius: 2px; border: 1px solid currentColor; white-space: nowrap; }
+.tag.ok { color: var(--shielded); } .tag.wait { color: var(--pending); } .tag.bad { color: var(--fail); } .tag.na { color: var(--steel); }
+.empty { color: var(--steel); font-size: .88rem; }
+
+.job { border-top: 1px solid var(--line); padding: .55rem 0; }
+.job:first-child { border-top: 0; padding-top: 0; }
+.job .head { display: flex; gap: .6rem; align-items: baseline; }
+.job .head .kind { font-weight: 600; }
+.job ol { margin: .3rem 0 0; padding-left: 1.3rem; color: var(--steel); font-size: .84rem; }
+.job .err { color: var(--fail); font-size: .85rem; margin-top: .3rem; word-break: break-word; }
+.job .res { font-family: var(--mono); font-size: .78rem; margin-top: .3rem; word-break: break-all; }
+
+pre.log {
+  margin: 0; max-height: 18rem; overflow: auto; font-family: var(--mono); font-size: .76rem;
+  background: var(--paper); border: 1px solid var(--line); border-radius: 3px; padding: .6rem; white-space: pre-wrap; word-break: break-word;
+}
+.banner { border-left: 4px solid var(--fail); background: var(--panel); padding: .6rem .9rem; margin-bottom: 1rem; font-size: .9rem; }
+details summary { cursor: pointer; color: var(--steel); font-size: .88rem; margin-top: .6rem; }
+</style>
+</head>
+<body>
+<header class="bar">
+  <h1>Railgun wallet <span class="meta" id="app-version"></span></h1>
+  <span class="meta" id="hdr-meta">locked</span>
+  <span class="spacer"></span>
+  <label class="check" style="margin:0"><input type="checkbox" id="auto-sync"> sync every minute</label>
+  <button class="quiet" id="btn-sync" disabled>Sync now</button>
+  <button class="quiet" id="btn-cache" disabled>Empty cache</button>
+  <button class="quiet" id="btn-lock" disabled>Lock</button>
+</header>
+
+<main>
+  <div class="banner" id="banner" hidden></div>
+
+  <!-- Locked view -->
+  <section id="view-unlock">
+    <h2>Open a wallet</h2>
+    <div class="row">
+      <div>
+        <label for="f-chain">Network</label>
+        <select id="f-chain">
+          <option value="11155111">Sepolia</option>
+          <option value="1">Ethereum mainnet</option>
+        </select>
+      </div>
+      <div>
+        <label for="f-rpc">RPC URL</label>
+        <input type="text" id="f-rpc" autocomplete="off">
+      </div>
+    </div>
+
+    <label for="f-source">Keys</label>
+    <select id="f-source">
+      <option value="phrase">Recovery phrase (software keys)</option>
+      <option value="ledger">Ledger device — USB</option>
+      <option value="ledger-ble">Ledger device — Bluetooth (Flex/Stax/Nano X)</option>
+    </select>
+    <p class="hint" id="ledger-hint" hidden>The spending key stays on the device: opening the wallet asks for three confirmations on it (spending key, viewing key, viewing pubkey), and every transfer or unshield is a blind-sign review. Unlock the device and open the ZKNOX Railgun app first — over USB plug it in; over Bluetooth pair it and turn Bluetooth on.</p>
+
+    <div id="wrap-phrase">
+    <label for="f-mnemonic">Recovery phrase</label>
+    <textarea id="f-mnemonic" autocomplete="off" spellcheck="false"></textarea>
+    <p class="hint">Prefilled with the public test phrase (“yellow” twelve times). Anyone can spend from it: test networks only.</p>
+    </div>
+    <div class="row">
+      <div id="wrap-derivation">
+        <label for="f-derivation">Key derivation</label>
+        <select id="f-derivation">
+          <option value="railgun">Railgun (same address as Railway)</option>
+          <option value="kohaku">kohaku (secp256k1 BIP-32)</option>
+        </select>
+      </div>
+      <div>
+        <label for="f-index">Account index</label>
+        <input type="number" id="f-index" min="0" value="0">
+      </div>
+    </div>
+    <details id="wrap-rawkeys">
+      <summary>Use raw spending and viewing keys instead</summary>
+      <div class="row">
+        <div><label for="f-spend">Spending key (hex)</label><input type="password" id="f-spend" autocomplete="off"></div>
+        <div><label for="f-view">Viewing key (hex)</label><input type="password" id="f-view" autocomplete="off"></div>
+      </div>
+    </details>
+
+    <label for="f-eoa">Public account private key (optional)</label>
+    <input type="password" id="f-eoa" autocomplete="off" placeholder="0x…">
+    <p class="hint">Leave empty to use the Ethereum account of the same phrase (m/44'/60'/0'/0/index, as MetaMask or Ledger Live derive it). It pays the gas for shielding. A key entered here replaces it. The accounts of the test phrase are public too: anything sent to them can be taken by anyone.</p>
+    <label class="check"><input type="checkbox" id="f-eoa-ledger"> Public account on the Ledger (Ethereum app)</label>
+    <p class="hint">Shields are signed by the Ledger's Ethereum app (account m/44'/60'/0'/0/index), over USB. The device runs one app at a time: when you shield, the wallet asks you to open the Ethereum app, then to reopen the Railgun app. Enable <b>Blind signing</b> in the Ethereum app's settings: it cannot decode the shield call.</p>
+
+    <div class="row">
+      <div><label for="f-bundler">Bundler URL (4337)</label><input type="text" id="f-bundler" autocomplete="off"></div>
+      <div>
+        <label for="f-wakumode">Waku node (legacy)</label>
+        <select id="f-wakumode">
+          <option value="native">Native, inside the wallet (no tab needed)</option>
+          <option value="browser">In this tab (js-waku), keep the tab open</option>
+          <option value="nwaku">Local nwaku over REST</option>
+        </select>
+      </div>
+    </div>
+    <div class="row" id="row-wakuurl" hidden>
+      <div><label for="f-waku">nwaku REST URL</label><input type="text" id="f-waku" autocomplete="off"></div>
+      <div></div>
+    </div>
+    <label for="f-trusted">Trusted fee signers (legacy, 0zk addresses)</label>
+    <textarea id="f-trusted" autocomplete="off" spellcheck="false"></textarea>
+    <p class="hint">Broadcasters are only used when their rate is between 10% under and 30% over the rate these signers announce (averaged). Prefilled with the four signers of the Railway wallet: using them means trusting that team for the reference rate. Required on mainnet. On Sepolia, write “none” to accept any authenticated offer if these signers announce nothing there.</p>
+    <div class="row">
+      <div><label class="check" style="margin-top:.8rem"><input type="checkbox" id="f-poi" checked> Proof of innocence (required on mainnet and Sepolia)</label></div>
+    </div>
+
+    <div class="actions">
+      <button id="btn-unlock">Open wallet</button>
+      <span class="hint" id="unlock-msg"></span>
+    </div>
+    <p class="hint">Keys stay in the memory of the local daemon and are never written to disk. Synced notes and pending proofs are stored under the data directory.</p>
+  </section>
+
+  <!-- Unlocked view -->
+  <div id="view-wallet" hidden>
+    <div class="rail">
+      <div class="side">
+        <h2>Public account</h2>
+        <div class="addr" id="eoa-addr">none</div>
+        <div id="eoa-bal" class="meta"></div>
+      </div>
+      <div class="track" aria-hidden="true">
+        <div class="lane" data-lane="shield">shield ⟶</div>
+        <div class="lane" data-lane="transfer">transfer ⟳</div>
+        <div class="lane" data-lane="unshield">⟵ unshield</div>
+      </div>
+      <div class="side shielded">
+        <h2>Shielded address</h2>
+        <div class="addr" id="zk-addr"></div>
+        <div class="actions" style="margin-top:.4rem"><button class="quiet" id="btn-copy">Copy</button></div>
+      </div>
+    </div>
+
+    <div class="layout">
+      <div>
+        <section>
+          <h2>Shielded balances</h2>
+          <div id="balances"></div>
+          <details><summary>Unspent notes</summary><div id="notes"></div></details>
+        </section>
+        <section>
+          <h2>Proofs of innocence waiting for submission</h2>
+          <div id="poi"></div>
+          <p class="hint">Each private transaction needs a follow-up proof before its change notes become spendable. Proofs are generated and submitted during sync, once the transaction is indexed. Transactions made before this wallet was opened here, or with another wallet, are detected and proved the same way. An entry whose transaction never reached the chain (a relayer that did not answer) is removed at the first sync 15 minutes after the proof.</p>
+        </section>
+      </div>
+
+      <div>
+        <section>
+          <h2>Send through</h2>
+          <div class="tabs" id="transport-tabs" role="tablist"></div>
+          <p class="hint" id="transport-note"></p>
+          <div class="diag" id="transport-diag" hidden></div>
+          <div id="aa-options" hidden>
+            <label class="check"><input type="checkbox" id="aa-single"> Prove once (one signature per operation, for hardware and threshold signers)</label>
+            <div class="row" id="aa-margin-row" hidden>
+              <div><label for="aa-margin">Gas margin (%)</label><input type="number" id="aa-margin" min="0" max="200" value="12"></div>
+              <div><label class="check" style="margin-top:1.9rem"><input type="checkbox" id="aa-strict"> Never fall back to several signatures</label></div>
+            </div>
+            <p class="hint">By default the proof is regenerated until the fee matches the bundler's estimate within 1%, which asks the signer up to five times. Proving once measures the gas first: the exact transaction is simulated with a dummy proof, nothing is signed, and the limits are set from that plus this margin (12% by default: the paymaster validation needs about 8% more than the simulation sees it use). You pay the margin, nothing is refunded. The RPC must support state overrides in eth_call; if it does not, the wallet falls back to the default path unless the box above is ticked, in which case it stops before any signature. If the limits turn out too low after proving, the operation stops before anything is sent.</p>
+          </div>
+          <div id="legacy-limits" hidden>
+            <div class="row">
+              <div><label for="l-rate">Highest rate accepted (× gas cost)</label><input type="text" id="l-rate" inputmode="decimal" value="1.5"></div>
+              <div><label for="l-maxfee">Highest fee accepted (wrapped token, optional)</label><input type="text" id="l-maxfee" inputmode="decimal" placeholder="no limit"></div>
+            </div>
+            <p class="hint">The fee is paid in the wrapped chain currency, so a fair broadcaster charges the gas cost plus a margin: 1.1 to 1.3. Offers above the rate are ignored, and the operation stops before proving if the fee exceeds the maximum. Both apply with or without trusted signers.</p>
+          </div>
+          <div id="legacy-box" hidden>
+            <div id="legacy-state" class="meta"></div>
+            <div id="legacy-quotes"></div>
+          </div>
+        </section>
+
+        <section>
+          <div class="tabs" id="action-tabs" role="tablist">
+            <button role="tab" data-action="shield" aria-selected="true">Shield</button>
+            <button role="tab" data-action="transfer" aria-selected="false">Transfer</button>
+            <button role="tab" data-action="unshield" aria-selected="false">Unshield</button>
+          </div>
+
+          <div id="form-shield">
+            <label for="s-asset">Token</label>
+            <input type="text" id="s-asset" value="native" autocomplete="off">
+            <p class="hint">“native” wraps and shields the chain currency. Otherwise an ERC-20 address; an approval is sent first when needed.</p>
+            <label for="s-amount">Amount</label>
+            <input type="text" id="s-amount" inputmode="decimal" placeholder="0.01">
+            <div class="actions"><button id="btn-shield">Shield</button></div>
+            <p class="hint">Shielding is always sent from the public account, whatever the transport.</p>
+          </div>
+
+          <div id="form-transfer" hidden>
+            <label for="t-to">Recipient 0zk address</label>
+            <textarea id="t-to" spellcheck="false"></textarea>
+            <div class="row">
+              <div><label for="t-asset">Token</label><input type="text" id="t-asset" value="native" autocomplete="off"></div>
+              <div><label for="t-amount">Amount</label><input type="text" id="t-amount" inputmode="decimal"></div>
+            </div>
+            <label for="t-memo">Memo (encrypted, optional)</label>
+            <input type="text" id="t-memo" autocomplete="off">
+            <div class="actions"><button id="btn-transfer">Transfer</button></div>
+          </div>
+
+          <div id="form-unshield" hidden>
+            <label for="u-to">Recipient 0x address</label>
+            <input type="text" id="u-to" autocomplete="off" placeholder="0x…">
+            <div class="row">
+              <div><label for="u-asset">Token</label><input type="text" id="u-asset" value="native" autocomplete="off"></div>
+              <div><label for="u-amount">Amount</label><input type="text" id="u-amount" inputmode="decimal"></div>
+            </div>
+            <label class="check"><input type="checkbox" id="u-native"> Unwrap and deliver the chain currency</label>
+            <div class="actions"><button id="btn-unshield">Unshield</button></div>
+            <p class="hint">Railgun keeps 0.25% of the unshielded amount. With 4337 and legacy the network fee is taken from the shielded wrapped-currency balance.</p>
+          </div>
+        </section>
+
+        <section>
+          <h2>Operations</h2>
+          <div id="jobs"></div>
+        </section>
+
+        <section>
+          <h2>SDK log</h2>
+          <pre class="log" id="log"></pre>
+        </section>
+      </div>
+    </div>
+  </div>
+</main>
+
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+const h = (tag, attrs, ...kids) => {
+  const el = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs || {})) {
+    if (k === "class") el.className = v; else if (k === "text") el.textContent = v; else el.setAttribute(k, v);
+  }
+  for (const kid of kids) el.append(kid);
+  return el;
+};
+
+const state = { broadcaster: null, transportUsable: false, legacy: null, status: null, activeJob: null, transport: null, action: "shield", logSeq: 0, lastAutoSync: 0 };
+const PREFS = ["f-chain", "f-rpc", "f-derivation", "f-index", "f-bundler", "f-waku", "f-wakumode", "f-trusted"];
+const DEFAULTS = {
+  "1": { rpc: "https://ethereum-rpc.publicnode.com", bundler: "https://public.pimlico.io/v2/1/rpc" },
+  "11155111": { rpc: "https://ethereum-sepolia-rpc.publicnode.com", bundler: "https://public.pimlico.io/v2/11155111/rpc" },
+};
+const TEST_PHRASE = Array(12).fill("yellow").join(" ");
+const isDefault = (kind, v) => !v.trim() || Object.values(DEFAULTS).some((d) => d[kind] === v.trim());
+
+// Fill the endpoints for the selected network, without touching a custom value.
+function applyDefaults() {
+  const d = DEFAULTS[$("f-chain").value];
+  if (!d) return;
+  if (isDefault("rpc", $("f-rpc").value)) $("f-rpc").value = d.rpc;
+  if (isDefault("bundler", $("f-bundler").value)) $("f-bundler").value = d.bundler;
+  if (!$("f-waku").value.trim()) $("f-waku").value = "http://127.0.0.1:8645";
+}
+function resetUnlockForm() {
+  applyDefaults();
+  if (!$("f-mnemonic").value) $("f-mnemonic").value = TEST_PHRASE;
+}
+
+async function api(path, body) {
+  const res = await fetch(path, body === undefined ? {} : {
+    method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || `request failed (${res.status})`);
+  return data;
+}
+
+function banner(msg) {
+  $("banner").hidden = !msg;
+  $("banner").textContent = msg || "";
+}
+
+function loadPrefs() {
+  for (const id of PREFS) {
+    try { const v = localStorage.getItem("rgw:" + id); if (v !== null) $(id).value = v; } catch {}
+  }
+  try { const p = localStorage.getItem("rgw:f-poi"); if (p !== null) $("f-poi").checked = p === "1"; } catch {}
+  try { $("f-eoa-ledger").checked = localStorage.getItem("rgw:f-eoa-ledger") === "1"; } catch {}
+  // 0.12.0: the native node replaces the one of the page as default, once, for stored "browser".
+  try {
+    if (localStorage.getItem("rgw:native-waku-default") === null) {
+      if ($("f-wakumode").value === "browser") $("f-wakumode").value = "native";
+      localStorage.setItem("rgw:native-waku-default", "1");
+    }
+  } catch {}
+}
+function savePrefs() {
+  for (const id of PREFS) { try { localStorage.setItem("rgw:" + id, $(id).value); } catch {} }
+  try { localStorage.setItem("rgw:f-poi", $("f-poi").checked ? "1" : "0"); } catch {}
+  try { localStorage.setItem("rgw:f-eoa-ledger", $("f-eoa-ledger").checked ? "1" : "0"); } catch {}
+}
+
+function poiTag(status, poiOn) {
+  if (!poiOn || status == null) return h("span", { class: "tag na", text: "no check" });
+  const map = { Valid: ["ok", "spendable"], ProofSubmitted: ["wait", "proof submitted"], Missing: ["wait", "waiting for proof"], ShieldBlocked: ["bad", "shield blocked"] };
+  const [cls, label] = map[status] || ["na", String(status)];
+  return h("span", { class: "tag " + cls, text: label });
+}
+
+function renderBalances(s) {
+  const box = $("balances"); box.replaceChildren();
+  if (!s.balances.length) {
+    box.append(h("p", { class: "empty", text: s.syncedBlock ? "Nothing shielded yet. Shield from the public account to start." : "Run a sync to load balances." }));
+    return;
+  }
+  const table = h("table", {}, h("tr", {}, h("th", { text: "Token" }), h("th", { class: "num", text: "Amount" }), h("th", { text: "Status" })));
+  for (const b of s.balances) {
+    table.append(h("tr", {},
+      h("td", {}, h("div", { text: b.symbol || b.asset }), h("div", { class: "addr", text: b.token || "" })),
+      h("td", { class: "num", text: b.formatted ?? b.amount }),
+      h("td", {}, poiTag(b.poiStatus, s.poi))));
+  }
+  box.append(table);
+}
+
+// Block explorer per chain id, for the notes' transaction links.
+const EXPLORERS = {
+  1: "https://etherscan.io",
+  11155111: "https://sepolia.etherscan.io",
+  137: "https://polygonscan.com",
+  56: "https://bscscan.com",
+  42161: "https://arbiscan.io",
+};
+
+// Transaction that created a note: short hash linking to the explorer (full hash on hover).
+function txCell(hash, chainId) {
+  if (!hash) return h("td", { class: "empty", text: "—" });
+  const short = hash.slice(0, 10) + "…" + hash.slice(-6);
+  const explorer = EXPLORERS[chainId];
+  if (!explorer) return h("td", { class: "addr", text: short, title: hash });
+  return h("td", { class: "addr" },
+    h("a", { href: `${explorer}/tx/${hash}`, text: short, title: hash, target: "_blank", rel: "noopener noreferrer" }));
+}
+
+// Token of a note: its symbol when known (full asset id on hover), else the asset id.
+function assetCell(n) {
+  return n.symbol ? h("td", { text: n.symbol, title: n.asset }) : h("td", { class: "addr", text: n.asset });
+}
+
+function renderNotes(s) {
+  const box = $("notes"); box.replaceChildren();
+  if (!s.notes.length) { box.append(h("p", { class: "empty", text: "No unspent note." })); return; }
+  const table = h("table", {}, h("tr", {}, h("th", { text: "Tree / leaf" }), h("th", { text: "Token" }), h("th", { class: "num", text: "Base units" }), h("th", { text: "Type" }), h("th", { text: "Status" }), h("th", { text: "Transaction" })));
+  for (const n of s.notes) {
+    table.append(h("tr", {},
+      h("td", { text: `${n.treeNumber} / ${n.leafIndex}` }),
+      assetCell(n),
+      h("td", { class: "num", text: n.amount }),
+      h("td", { text: String(n.commitmentType) + (n.memo ? ` (${n.memo})` : "") }),
+      h("td", {}, poiTag(n.poiStatus, s.poi)),
+      txCell(n.txHash, s.chainId)));
+  }
+  box.append(table);
+}
+
+function renderPoi(s) {
+  const box = $("poi"); box.replaceChildren();
+  if (!s.poi) { box.append(h("p", { class: "empty", text: "Proof of innocence is off for this session." })); return; }
+  if (!s.poiPending.length) { box.append(h("p", { class: "empty", text: "None." })); return; }
+  const table = h("table", {}, h("tr", {}, h("th", { text: "Railgun txid" }), h("th", { class: "num", text: "In / out" }), h("th", { text: "Unshield" })));
+  for (const p of s.poiPending) {
+    table.append(h("tr", {}, h("td", { class: "addr", text: p.txid }), h("td", { class: "num", text: `${p.inputs} / ${p.outputs}` }), h("td", { text: p.hasUnshield ? "yes" : "no" })));
+  }
+  box.append(table);
+}
+
+function legacyQuotes(s) {
+  const l = state.legacy;
+  if (!l || !l.reachable || !s.wrappedBaseToken) return [];
+  const weth = s.wrappedBaseToken.toLowerCase();
+  const soon = Date.now() + 40000;
+  const ours = s.poiListKeys || [];
+  // Same filters as the engine, so the tab never says "usable" for an offer it will refuse.
+  return l.quotes.filter((q) => q.token === weth && q.availableWallets > 0 && q.expiration >= soon
+    && (q.requiredPoiListKeys || []).every((k) => ours.includes(k)));
+}
+
+const PAR = 10n ** 18n;
+// "1.5" -> 1500000000000000000n, null when not a positive decimal.
+function parseDecimal18(text) {
+  const m = /^(\d+)(?:[.,](\d{1,18}))?$/.exec(text.trim());
+  if (!m) return null;
+  return BigInt(m[1]) * PAR + BigInt((m[2] || "").padEnd(18, "0") || "0");
+}
+function rateCeiling() { return parseDecimal18($("l-rate").value || "1.5"); }
+function underCeiling(q) { const c = rateCeiling(); return c !== null && BigInt(q.feePerUnitGas) <= c; }
+function timesGas(rate) { const h = BigInt(rate) * 100n / PAR; return `${h / 100n}.${String(h % 100n).padStart(2, "0")}`; }
+function feeLimits() {
+  return {
+    maxFeeRate: $("l-rate").value.trim() || null, maxFee: $("l-maxfee").value.trim() || null,
+    singleProof: $("aa-single").checked, gasMarginPercent: Number($("aa-margin").value) || null,
+    singleProofStrict: $("aa-strict").checked,
+    broadcaster: state.broadcaster,
+  };
+}
+
+function renderLegacy(s) {
+  const box = $("legacy-box"); const l = state.legacy;
+  $("legacy-limits").hidden = state.transport !== "legacy";
+  $("aa-options").hidden = state.transport !== "erc4337";
+  $("aa-margin-row").hidden = !$("aa-single").checked;
+  box.hidden = state.transport !== "legacy" || !l || !l.reachable;
+  if (!l) return;
+  const usable = legacyQuotes(s);
+  const weth = (s.wrappedBaseToken || "").toLowerCase();
+  const auth = (l.authorizedFees || []).find((a) => a.token === weth);
+  const trust = !l.trustedSigners
+    ? " No trusted fee signer set: only your rate ceiling applies."
+    : auth
+      ? ` ${l.trustedSigners} trusted signer(s), authorized rate ${auth.feePerUnitGas}, accepted from ${BigInt(auth.feePerUnitGas) - BigInt(auth.feePerUnitGas) * 10n / 100n} to ${BigInt(auth.feePerUnitGas) + BigInt(auth.feePerUnitGas) * 30n / 100n}.`
+      : ` ${l.trustedSigners} trusted signer(s), no rate announced yet: every offer is held back.`;
+  $("legacy-state").textContent = l.reachable
+    ? `Waku node ${l.mode === "browser" ? "in this tab" : l.mode === "native" ? "(native)" : l.wakuUrl}: connected${l.peers != null ? `, ${l.peers} peer(s)` : ""}. ${usable.filter(underCeiling).length} of ${usable.length} broadcaster offer(s) usable for the wrapped base token.${trust}`
+    : l.mode === "native"
+      ? `Native Waku node not ready: ${l.error || "starting"}. It dials the Railgun fleet (wss, port 8000) and retries on its own.`
+      : `Waku node ${l.wakuUrl || ""} unreachable: ${l.error || "no answer"}. Start nwaku on the Railgun shard (see the README) to use the legacy transport.`;
+  const q = $("legacy-quotes"); q.replaceChildren();
+  if (state.transport !== "legacy" || !usable.length) return;
+  const table = h("table", {}, h("tr", {}, h("th", { text: "" }), h("th", { text: "Broadcaster" }), h("th", { class: "num", text: "Rate (× gas cost)" }), h("th", { class: "num", text: "Reliability" }), h("th", { class: "num", text: "Expires in" })));
+  for (const x of [...usable].sort((a, b) => (BigInt(a.feePerUnitGas) < BigInt(b.feePerUnitGas) ? -1 : 1)).slice(0, 6)) {
+    const pickBtn = h("button", { class: "quiet", text: state.broadcaster === x.railgunAddress ? "chosen" : "use" });
+    pickBtn.addEventListener("click", () => { state.broadcaster = state.broadcaster === x.railgunAddress ? null : x.railgunAddress; render(); });
+    table.append(h("tr", {},
+      h("td", {}, pickBtn),
+      h("td", { class: "addr", text: `${x.railgunAddress.slice(0, 12)}…${x.railgunAddress.slice(-4)}${x.identifier ? " (" + x.identifier + ")" : ""}` }),
+      h("td", { class: "num" }, timesGas(x.feePerUnitGas) + " ", underCeiling(x) ? "" : h("span", { class: "tag bad", text: "over ceiling" })),
+      h("td", { class: "num", text: String(x.reliability) }),
+      h("td", { class: "num", text: Math.max(0, Math.round((x.expiration - Date.now()) / 1000)) + "s" })));
+  }
+  q.append(table);
+  q.append(h("p", { class: "hint", text: state.broadcaster
+    ? "Requests go to the chosen broadcaster. Click it again to go back to the draw."
+    : "Without a choice, one offer is drawn among those within 10% of the cheapest; a broadcaster that stayed silent is left out for 10 minutes." }));
+}
+
+// Why the legacy transport cannot be used right now, and what to do about it. Empty when usable.
+function legacyProblem(s) {
+  const l = state.legacy;
+  if (!l || !l.mode) return "The broadcaster monitor has not reported yet.";
+  if (!l.reachable && l.mode === "native") return `The native Waku node is not connected yet (${l.error || "starting"}). It dials the Railgun fleet over wss on port 8000 and retries on its own; a network that blocks outgoing WebSocket connections to that port prevents it.`;
+  if (!l.reachable && l.mode === "browser") return `${tab.note()} Daemon side: ${l.error || "waiting"}. The node lives in this page: keep the tab open while using the legacy transport.`;
+  if (!l.reachable) return `No Waku node answers at ${l.wakuUrl} (${l.error || "no answer"}). The legacy transport needs a local nwaku node on the Railgun shard: see crates/railgun-broadcaster/README.md. To try the path without the network, run: cargo run -p railgun-broadcaster --example fake_network -- 8645 ${s.chainId}`;
+  if (rateCeiling() === null) return "The highest rate accepted is not a number. Use a multiple of the gas cost such as 1.5.";
+  const usable = legacyQuotes(s);
+  if (usable.some(underCeiling)) return "";
+  if (usable.length) {
+    const cheapest = usable.map((q) => BigInt(q.feePerUnitGas)).reduce((a, b) => (a < b ? a : b));
+    return `${usable.length} offer(s), the cheapest at ${timesGas(cheapest)} times the gas cost, above your ceiling of ${$("l-rate").value.trim()}. Raise the ceiling only if you accept that price.`;
+  }
+  if (l.peers === 0) return `The Waku node at ${l.wakuUrl} has no peer: it is not connected to the Railgun fleet (check cluster 5, shard 1 and the DNS discovery URL).`;
+  if (l.trustedSigners && !(l.authorizedFees || []).length) return `Connected${l.peers != null ? ` to ${l.peers} peer(s)` : ""}, but none of the ${l.trustedSigners} trusted fee signer(s) has announced a rate, so every offer is held back. On Sepolia, lock and reopen the wallet with “none” in the trusted fee signers field.`;
+  if (l.trustedSigners) return "Connected, but every offer for the wrapped base token is outside the band of the trusted fee signers.";
+  return `Connected${l.peers != null ? ` to ${l.peers} peer(s)` : ""}, no offer for the wrapped base token yet. Broadcasters announce every few seconds: if nothing comes within a minute, the node is probably not on the Railgun shard.`;
+}
+
+function transportProblem(s, id) {
+  const t = s.transports.find((x) => x.id === id);
+  if (!t) return "No transport selected.";
+  if (id === "legacy") return legacyProblem(s);
+  return t.enabled ? "" : t.note;
+}
+
+function renderTransports(s) {
+  const tabs = $("transport-tabs"); tabs.replaceChildren();
+  // Every transport can be selected, so its diagnostic is one click away. An unusable one only
+  // disables the send buttons.
+  if (!s.transports.some((t) => t.id === state.transport)) {
+    const firstUsable = s.transports.find((t) => !transportProblem(s, t.id));
+    state.transport = (firstUsable || s.transports[0] || {}).id || null;
+  }
+  for (const t of s.transports) {
+    const problem = transportProblem(s, t.id);
+    const btn = h("button", { role: "tab", "aria-selected": String(t.id === state.transport), class: problem ? "off" : "", title: problem || t.note, text: t.label });
+    btn.addEventListener("click", () => { state.transport = t.id; render(); });
+    tabs.append(btn);
+  }
+  const current = s.transports.find((t) => t.id === state.transport);
+  $("transport-note").textContent = current ? current.note + "." : "";
+  const problem = state.transport ? transportProblem(s, state.transport) : "No transport available.";
+  const diag = $("transport-diag");
+  diag.hidden = !problem;
+  diag.textContent = problem ? "Cannot send through this transport yet. " + problem : "";
+  state.transportUsable = !problem;
+}
+
+function renderJobs(jobs) {
+  const box = $("jobs"); box.replaceChildren();
+  if (!jobs.length) { box.append(h("p", { class: "empty", text: "No operation yet." })); return; }
+  for (const j of jobs.slice(0, 12)) {
+    const cls = { done: "ok", failed: "bad", running: "wait", queued: "na" }[j.state];
+    const el = h("div", { class: "job" },
+      h("div", { class: "head" }, h("span", { class: "kind", text: `#${j.id} ${j.kind}` }), h("span", { class: "tag " + cls, text: j.state }),
+        h("span", { class: "meta", text: new Date(j.createdAt).toLocaleTimeString() })));
+    if (j.steps.length) { const ol = h("ol"); j.steps.forEach((st) => ol.append(h("li", { text: st }))); el.append(ol); }
+    if (j.error) el.append(h("div", { class: "err", text: j.error }));
+    if (j.result) el.append(h("div", { class: "res", text: JSON.stringify(j.result) }));
+    box.append(el);
+  }
+}
+
+function render() {
+  const s = state.status;
+  const unlocked = !!(s && s.unlocked);
+  $("view-unlock").hidden = unlocked;
+  $("view-wallet").hidden = !unlocked;
+  $("btn-lock").disabled = !unlocked;
+  $("btn-cache").disabled = !unlocked || !!state.activeJob;
+  const busy = !!state.activeJob;
+  $("btn-sync").disabled = !unlocked || busy;
+  for (const id of ["btn-shield", "btn-transfer", "btn-unshield"]) $(id).disabled = busy;
+  if (!unlocked) { $("hdr-meta").textContent = "locked"; return; }
+
+  const chain = { 1: "mainnet", 11155111: "Sepolia" }[s.chainId] || `chain ${s.chainId}`;
+  $("hdr-meta").textContent = `${chain}, synced to block ${s.syncedBlock ?? "?"}, keys: ${s.derivation}` + (busy ? `, running ${state.activeJob.kind}` : "");
+  $("zk-addr").textContent = s.address;
+  $("eoa-addr").textContent = s.eoa || (s.eoaLedger ? "on the Ledger (Ethereum app): read at the first shield" : "none (shielding disabled)");
+  $("eoa-bal").textContent = [s.eoaBalance != null ? `${s.eoaBalance} native` : null, s.eoaSource].filter(Boolean).join(", ");
+  $("btn-shield").disabled = busy || !(s.eoa || s.eoaLedger);
+  renderBalances(s); renderNotes(s); renderPoi(s); renderTransports(s); renderLegacy(s);
+  $("btn-transfer").disabled = busy || !state.transportUsable;
+  $("btn-unshield").disabled = busy || !state.transportUsable;
+  document.querySelectorAll(".lane").forEach((l) => l.classList.toggle("on", l.dataset.lane === state.action));
+}
+
+async function poll() {
+  try {
+    const { status, activeJob, legacy } = await api("/api/status");
+    state.status = status; state.activeJob = activeJob; state.legacy = legacy;
+    if (status.unlocked && legacy && legacy.mode === "browser") tab.ensure(status.chainId);
+    else if (tab.chainId !== null) tab.stop();
+    render();
+    if (status.unlocked) {
+      const { jobs } = await api("/api/jobs"); renderJobs(jobs);
+      const { lines } = await api("/api/logs?since=" + state.logSeq);
+      if (lines.length) {
+        const log = $("log");
+        const stick = log.scrollTop + log.clientHeight >= log.scrollHeight - 8;
+        for (const l of lines) { log.append(`${new Date(l.ts).toLocaleTimeString()} ${l.level.padEnd(5)} ${l.msg}\n`); state.logSeq = l.seq; }
+        if (stick) log.scrollTop = log.scrollHeight;
+      }
+      if ($("auto-sync").checked && !activeJob && Date.now() - state.lastAutoSync > 60000) {
+        state.lastAutoSync = Date.now();
+        api("/api/op", { op: "sync" }).catch(() => {});
+      }
+    }
+    if ($("banner").dataset.kind === "conn") { banner(""); delete $("banner").dataset.kind; }
+  } catch (e) {
+    $("banner").dataset.kind = "conn";
+    banner("The wallet daemon is not answering: " + e.message);
+  }
+}
+
+async function submitOp(body) {
+  banner("");
+  try { await api("/api/op", body); await poll(); } catch (e) { banner(e.message); }
+}
+
+$("f-source").addEventListener("change", () => {
+  const ledger = $("f-source").value.startsWith("ledger");
+  $("wrap-phrase").hidden = ledger;
+  $("wrap-derivation").hidden = ledger;
+  $("wrap-rawkeys").hidden = ledger;
+  $("ledger-hint").hidden = !ledger;
+  // A Ledger unlock signs public transactions with the same device (Ethereum app).
+  if (ledger) $("f-eoa-ledger").checked = true;
+});
+
+$("btn-unlock").addEventListener("click", async () => {
+  savePrefs();
+  const source = $("f-source").value;
+  const ledger = source.startsWith("ledger");
+  const ledgerTransport = source === "ledger-ble" ? "ble" : "usb";
+  const btn = $("btn-unlock"); btn.disabled = true;
+  $("unlock-msg").textContent = ledger
+    ? (ledgerTransport === "ble"
+        ? "Opening over Bluetooth: scanning for the Ledger, then confirm the three prompts on it…"
+        : "Opening: confirm the three prompts on the Ledger (spending key, viewing key, viewing pubkey)…")
+    : "Opening: loading the local database and registering the keys…";
+  banner("");
+  try {
+    await api("/api/unlock", {
+      chainId: Number($("f-chain").value), rpcUrl: $("f-rpc").value.trim(),
+      ledger, ledgerTransport,
+      mnemonic: ledger ? null : ($("f-mnemonic").value.trim() || null),
+      spendingKey: ledger ? null : ($("f-spend").value.trim() || null),
+      viewingKey: ledger ? null : ($("f-view").value.trim() || null),
+      derivation: $("f-derivation").value, index: Number($("f-index").value || 0),
+      eoaKey: $("f-eoa").value.trim() || null, eoaLedger: $("f-eoa-ledger").checked, poi: $("f-poi").checked,
+      bundlerUrl: $("f-bundler").value.trim() || null,
+      wakuUrl: $("f-waku").value.trim() || null,
+      wakuMode: $("f-wakumode").value,
+      trustedFeeSigners: $("f-trusted").value.trim() || null,
+    });
+    for (const id of ["f-mnemonic", "f-spend", "f-view", "f-eoa"]) $(id).value = "";
+    resetUnlockForm();
+    state.lastAutoSync = Date.now();
+    await api("/api/op", { op: "sync" });
+  } catch (e) { banner("Could not open the wallet: " + e.message); }
+  $("unlock-msg").textContent = ""; btn.disabled = false;
+  poll();
+});
+
+$("btn-lock").addEventListener("click", async () => { try { await api("/api/lock", {}); $("log").textContent = ""; } catch (e) { banner(e.message); } poll(); });
+$("btn-cache").addEventListener("click", async () => {
+  const ok = window.confirm(
+    "Empty the local cache of this wallet on this network?\n\n" +
+    "This deletes the synced notes, the Merkle trees and the pending proof-of-innocence entries. " +
+    "It will require a full resync (one to two minutes on Sepolia, longer on mainnet), and the wallet " +
+    "is locked: you will have to open it again.\n\n" +
+    "No funds or keys are affected. Proofs still owed for transactions that were mined are rebuilt from the chain at the next syncs.");
+  if (!ok) return;
+  banner("");
+  try {
+    const r = await api("/api/empty-cache", {});
+    await tab.stop(); $("log").textContent = "";
+    banner("Cache emptied: " + r.removed + ". Open the wallet again, the first sync will be a full one.");
+  } catch (e) { banner("Could not empty the cache: " + e.message); }
+  poll();
+});
+$("btn-sync").addEventListener("click", () => submitOp({ op: "sync" }));
+$("btn-copy").addEventListener("click", () => navigator.clipboard?.writeText($("zk-addr").textContent));
+
+$("btn-shield").addEventListener("click", () => submitOp({ op: "shield", asset: $("s-asset").value, amount: $("s-amount").value }));
+$("btn-transfer").addEventListener("click", () => submitOp({ op: "transfer", to: $("t-to").value, asset: $("t-asset").value, amount: $("t-amount").value, memo: $("t-memo").value, transport: state.transport, ...feeLimits() }));
+$("btn-unshield").addEventListener("click", () => submitOp({ op: "unshield", to: $("u-to").value, asset: $("u-asset").value, amount: $("u-amount").value, native: $("u-native").checked, transport: state.transport, ...feeLimits() }));
+
+document.querySelectorAll("#action-tabs button").forEach((btn) => btn.addEventListener("click", () => {
+  state.action = btn.dataset.action;
+  document.querySelectorAll("#action-tabs button").forEach((b) => b.setAttribute("aria-selected", String(b === btn)));
+  for (const a of ["shield", "transfer", "unshield"]) $("form-" + a).hidden = a !== state.action;
+  render();
+}));
+
+try { $("aa-single").checked = localStorage.getItem("rgw:aa-single") === "1"; } catch {}
+try { $("aa-strict").checked = localStorage.getItem("rgw:aa-strict") === "1"; } catch {}
+$("aa-strict").addEventListener("change", () => { try { localStorage.setItem("rgw:aa-strict", $("aa-strict").checked ? "1" : "0"); } catch {} });
+$("aa-single").addEventListener("change", () => { try { localStorage.setItem("rgw:aa-single", $("aa-single").checked ? "1" : "0"); } catch {} render(); });
+// The margin default went from 25 to 12 in 0.10.1: a stored 25 is the old default, not a choice.
+try { if (localStorage.getItem("rgw:aa-margin") === "25" && !localStorage.getItem("rgw:aa-margin-v2")) localStorage.removeItem("rgw:aa-margin"); localStorage.setItem("rgw:aa-margin-v2", "1"); } catch {}
+for (const id of ["l-rate", "l-maxfee", "aa-margin"]) {
+  try { const v = localStorage.getItem("rgw:" + id); if (v !== null && v !== "") $(id).value = v; } catch {}
+  $(id).addEventListener("input", () => { try { localStorage.setItem("rgw:" + id, $(id).value); } catch {} render(); });
+}
+// ---- Waku light node of this tab (legacy transport, "browser" mode) ----
+const b64 = {
+  enc(bytes) { let s = ""; for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000)); return btoa(s); },
+  dec(text) { const s = atob(text); const out = new Uint8Array(s.length); for (let i = 0; i < s.length; i++) out[i] = s.charCodeAt(i); return out; },
+};
+const tab = {
+  config: null, chainId: null, inbox: [], acks: [], status: { state: "stopped", peers: 0, error: null }, timer: null, loading: null, lastSendError: null,
+  note() {
+    const st = this.status;
+    const text = { stopped: "The Waku node of this tab is stopped.", loading: "Loading the Waku node.", starting: "The Waku node of this tab is starting.",
+      connecting: "The Waku node of this tab is dialling the Railgun fleet (up to a minute).", subscribing: "The Waku node of this tab is subscribing to the broadcaster topics.",
+      connected: `The Waku node of this tab is connected to ${st.peers} peer(s).`,
+      error: `The Waku node of this tab could not connect: ${st.error}. It retries every 30 seconds. A network that blocks outgoing WebSocket connections to port 8000 causes this.` }[st.state];
+    return (text || st.state) + (this.lastSendError ? ` Last publish failed: ${this.lastSendError}.` : "");
+  },
+  loadBundle() {
+    if (window.RailgunWaku) return Promise.resolve();
+    if (!this.loading) this.loading = new Promise((resolve, reject) => {
+      const el = document.createElement("script"); el.src = "/waku-bundle.js";
+      el.onload = resolve; el.onerror = () => { this.loading = null; reject(new Error("could not load /waku-bundle.js")); };
+      document.head.append(el);
+    });
+    return this.loading;
+  },
+  async ensure(chainId) {
+    if (this.chainId === chainId && ["loading", "starting", "connecting", "subscribing", "connected"].includes(this.status.state)) return;
+    if (this.status.state === "error" && Date.now() - (this.failedAt || 0) < 30000 && this.chainId === chainId) return;
+    await this.stop();
+    this.chainId = chainId; this.status = { state: "loading", peers: 0, error: null };
+    if (!this.timer) this.timer = setInterval(() => this.exchange(), 1000);
+    try {
+      await this.loadBundle();
+      if (!this.config) this.config = (await api("/api/defaults")).waku;
+      const topics = ["fees", "transact-response"].map((t) => `/railgun/v2/0-${chainId}-${t}/json`);
+      await window.RailgunWaku.start({ ...this.config, contentTopics: topics, peerTimeoutMs: 60000 },
+        (m) => { this.inbox.push({ contentTopic: m.contentTopic, payload: b64.enc(m.payload), timestampNs: m.timestampNs }); if (this.inbox.length > 500) this.inbox.shift(); },
+        (st) => { this.status = st; });
+    } catch (e) {
+      this.failedAt = Date.now();
+      this.status = { state: "error", peers: 0, error: e && e.message ? e.message : String(e) };
+    }
+  },
+  async exchange() {
+    const st = window.RailgunWaku ? { ...this.status, peers: window.RailgunWaku.status().peers } : this.status;
+    const messages = this.inbox.splice(0);
+    const acks = this.acks.splice(0);
+    try {
+      const { publish } = await api("/api/waku/exchange", { connected: st.state === "connected", peers: st.peers || 0, detail: st.error ? `${st.state}: ${st.error}` : st.state, messages, acks });
+      for (const p of publish) {
+        try { const peers = await window.RailgunWaku.send(p.contentTopic, b64.dec(p.payload)); this.lastSendError = null; this.acks.push({ id: p.id, peers }); }
+        catch (e) { this.lastSendError = e && e.message ? e.message : String(e); this.acks.push({ id: p.id, peers: 0, error: this.lastSendError }); }
+      }
+    } catch { this.inbox.unshift(...messages); this.acks.unshift(...acks); }
+  },
+  async stop() {
+    if (this.timer) { clearInterval(this.timer); this.timer = null; }
+    this.chainId = null; this.inbox = [];
+    if (window.RailgunWaku) { try { await window.RailgunWaku.stop(); } catch {} }
+    this.status = { state: "stopped", peers: 0, error: null };
+  },
+};
+
+function syncWakuModeField() { $("row-wakuurl").hidden = $("f-wakumode").value !== "nwaku"; }
+$("f-wakumode").addEventListener("change", syncWakuModeField);
+
+loadPrefs();
+syncWakuModeField();
+resetUnlockForm();
+api("/api/defaults").then((d) => {
+  $("app-version").textContent = "v" + d.version;
+  if (d.nativeWaku === false) {
+    const opt = $("f-wakumode").querySelector('option[value="native"]');
+    if (opt) opt.remove();
+    if (!$("f-wakumode").value) $("f-wakumode").value = "browser";
+    syncWakuModeField();
+  }
+  document.title = "Railgun wallet v" + d.version;
+  if (!$("f-trusted").value.trim()) $("f-trusted").value = d.trustedFeeSigners.join("\n");
+}).catch(() => {});
+$("f-chain").addEventListener("change", applyDefaults);
+poll();
+setInterval(poll, 2000);
+</script>
+</body>
+</html>

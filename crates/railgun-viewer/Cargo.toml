@@ -1,0 +1,30 @@
+[package]
+name = "railgun-viewer"
+version = "0.2.20"
+edition = "2024"
+description = "ZKNOX read-only Railgun history and lineage viewer on the kohaku Rust SDK (mnemonic or viewing key)"
+publish = false
+
+[[bin]]
+name = "railgun-viewer"
+path = "src/main.rs"
+
+[dependencies]
+alloy = { workspace = true, default-features = true }
+anyhow = { workspace = true }
+async-trait = { workspace = true }
+crypto = { workspace = true }
+base64 = "0.22"
+axum = { version = "0.8", default-features = false, features = ["http1", "json", "tokio", "query"] }
+hex = { workspace = true }
+railgun = { workspace = true }
+railgun-broadcaster = { path = "../railgun-broadcaster", features = ["light-node"] }
+railgun-wallet = { path = "../railgun-wallet", default-features = false }
+rand = { workspace = true }
+reqwest = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+tokio = { workspace = true, features = ["full"] }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }

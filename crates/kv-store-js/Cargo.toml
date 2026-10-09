@@ -1,0 +1,16 @@
+[package]
+name = "kv-store-js"
+version = "0.1.0"
+edition = "2024"
+description = "Browser storage backend (a JS database object, IndexedDB in the web wallets) for kohaku-kv-store"
+
+[dependencies]
+async-trait = { workspace = true }
+hex = { workspace = true }
+kohaku-kv-store = { workspace = true }
+send_wrapper = { version = "0.6", features = ["futures"] }
+wasm-bindgen = { workspace = true }
+wasm-bindgen-futures = { workspace = true }
+
+[lints]
+workspace = true

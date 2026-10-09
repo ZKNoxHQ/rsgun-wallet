@@ -1,0 +1,4 @@
+[target.wasm32-unknown-unknown]
+# web_sys_unstable_apis unlocks web-sys WebUSB (navigator.usb) for the
+# railgun-ledger `webusb` transport; harmless when unused.
+rustflags = ['--cfg', 'getrandom_backend="wasm_js"', '--cfg', 'web_sys_unstable_apis']

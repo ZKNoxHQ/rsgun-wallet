@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>waku-light in a Web Worker</title>
+<style>
+  body { font: 14px/1.4 system-ui, sans-serif; margin: 2rem; max-width: 70rem; color: #222; }
+  h1 { font-size: 1.3rem; }
+  .row { display: flex; gap: .6rem; align-items: center; margin-bottom: 1rem; }
+  #status, #echolog { font-family: ui-monospace, monospace; white-space: pre-wrap; }
+  #status { background: #f4f4f4; padding: .6rem; }
+  #echolog { margin-top: .6rem; }
+  table { border-collapse: collapse; width: 100%; margin-top: 1rem; }
+  th, td { text-align: left; padding: .3rem .5rem; border-bottom: 1px solid #ddd; font-size: 13px; }
+  td.mono { font-family: ui-monospace, monospace; }
+  .muted { color: #777; }
+</style>
+</head>
+<body>
+<h1>waku-light (Rust, wasm32) in a dedicated Web Worker</h1>
+<p class="muted">Same node as <a href="index.html">index.html</a>, hosted in a worker: the page only renders what the
+worker posts. "Largest poll gap" is the longest interval between two of the worker's 1 s timer ticks; put the tab in
+the background for a few minutes and come back to see whether the worker was throttled. The echo test publishes
+three small messages on a content topic no broadcaster listens to.</p>
+<div class="row">
+  <select id="chain">
+    <option value="11155111">Sepolia</option>
+    <option value="1">Ethereum</option>
+    <option value="42161">Arbitrum One</option>
+    <option value="137">Polygon</option>
+    <option value="56">BNB Chain</option>
+  </select>
+  <button id="start" disabled>Start</button>
+  <button id="stop" disabled>Stop</button>
+  <button id="echo" disabled>Echo test</button>
+</div>
+<div id="status">loading the worker…</div>
+<div id="echolog"></div>
+<table>
+  <thead><tr><th>Broadcaster</th><th>Identifier</th><th>Version</th><th>Wallets</th><th>Reliability</th><th>Tokens</th><th>Offer expires</th><th>Announcements</th><th>Last seen</th></tr></thead>
+  <tbody id="rows"></tbody>
+</table>
+<script type="module">
+const $ = (id) => document.getElementById(id);
+const worker = new Worker("./worker.js", { type: "module" });
+const seen = new Map();
+const echoLog = [];
+
+function render() {
+  const rows = [...seen.values()].sort((a, b) => b.last - a.last);
+  $("rows").replaceChildren(...rows.map((r) => {
+    const tr = document.createElement("tr");
+    const cells = [
+      [r.address.slice(0, 14) + "…" + r.address.slice(-4), "mono"], [r.identifier || "-"], [r.version],
+      [String(r.wallets)], [String(r.reliability)], [String(r.tokens)],
+      [Math.max(0, Math.round((r.expires - Date.now()) / 1000)) + " s"], [String(r.count)],
+      [Math.round((Date.now() - r.last) / 1000) + " s ago"],
+    ];
+    for (const [text, cls] of cells) { const td = document.createElement("td"); td.textContent = text; if (cls) td.className = cls; tr.append(td); }
+    return tr;
+  }));
+}
+
+worker.onmessage = (e) => {
+  const m = e.data;
+  if (m.type === "loaded") { $("start").disabled = false; $("status").textContent = "worker ready"; }
+  if (m.type === "status") {
+    for (const f of m.fees) {
+      const prev = seen.get(f.address);
+      seen.set(f.address, { ...f, count: (prev ? prev.count : 0) + 1, last: Date.now() });
+    }
+    const s = m.status;
+    $("status").textContent =
+      `peer ${m.peerId}\ntopic ${m.topic}\nuptime ${m.uptime} s, largest poll gap ${(m.maxGap / 1000).toFixed(1)} s\n` +
+      `connected ${s.connectedPeers}, service nodes ${s.servicePeers}, filter subscriptions ${s.filterSubscriptions}\n` +
+      `${m.total} message(s)` + (m.firstAt !== null ? `, first after ${m.firstAt.toFixed(1)} s` : "") +
+      (s.lastError ? `\nlast error: ${s.lastError}` : "");
+    render();
+  }
+  if (m.type === "echo") {
+    echoLog.push(m.line); $("echolog").textContent = echoLog.join("\n");
+    if (m.done) $("echo").disabled = false;
+  }
+  if (m.type === "stopped") { $("status").textContent = "stopped"; }
+};
+worker.onerror = (e) => { $("status").textContent = `worker error: ${e.message}`; };
+
+$("start").onclick = () => {
+  seen.clear(); echoLog.length = 0; $("echolog").textContent = "";
+  worker.postMessage({ cmd: "start", chainId: Number($("chain").value) });
+  $("stop").disabled = false; $("echo").disabled = false;
+};
+$("stop").onclick = () => { worker.postMessage({ cmd: "stop" }); $("stop").disabled = true; $("echo").disabled = true; $("rows").replaceChildren(); };
+$("echo").onclick = () => { echoLog.length = 0; $("echolog").textContent = ""; $("echo").disabled = true; worker.postMessage({ cmd: "echo" }); };
+</script>
+</body>
+</html>

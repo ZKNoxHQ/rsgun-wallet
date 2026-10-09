@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Railgun broadcasters, Rust in the browser</title>
+<style>
+  body { font: 14px/1.4 system-ui, sans-serif; margin: 2rem; max-width: 72rem; color: #222; }
+  h1 { font-size: 1.3rem; }
+  .row { display: flex; gap: .8rem; align-items: center; margin-bottom: 1rem; }
+  #status { font-family: ui-monospace, monospace; background: #f4f4f4; padding: .6rem; white-space: pre-wrap; }
+  table { border-collapse: collapse; width: 100%; margin-top: 1rem; }
+  th, td { text-align: left; padding: .3rem .5rem; border-bottom: 1px solid #ddd; font-size: 13px; }
+  td.mono { font-family: ui-monospace, monospace; }
+  td.num, th.num { text-align: right; }
+  .muted { color: #777; }
+</style>
+</head>
+<body>
+<h1>Railgun broadcasters: BroadcasterClient on the Rust Waku light node (wasm32)</h1>
+<p class="muted">Fee announcements received over the browser's WebSocket, authenticated with each broadcaster's
+viewing key, capped by the trusted signers when enabled, as in the wallet. Nothing is published.</p>
+<div class="row">
+  <select id="chain">
+    <option value="11155111">Sepolia</option>
+    <option value="1">Ethereum</option>
+    <option value="42161">Arbitrum One</option>
+    <option value="137">Polygon</option>
+    <option value="56">BNB Chain</option>
+  </select>
+  <label><input type="checkbox" id="trusted" checked> Railway trusted signers</label>
+  <button id="start">Start</button>
+  <button id="stop" disabled>Stop</button>
+</div>
+<div id="status">stopped</div>
+<table>
+  <thead><tr><th>Broadcaster</th><th>Identifier</th><th>Token</th><th class="num">Rate</th><th class="num">Wallets</th><th class="num">Reliability</th><th>Version</th><th class="num">Expires</th></tr></thead>
+  <tbody id="rows"></tbody>
+</table>
+<script type="module">
+import init, { WebBroadcasters } from "./pkg/web_light_fees.js";
+
+const $ = (id) => document.getElementById(id);
+const PAR = 10n ** 18n;
+let client = null, timer = null, started = 0, accepted = 0, lastTick = "";
+
+// Rate as a multiple of the gas cost for 18-decimal tokens; raw value otherwise.
+function rate(q) {
+  const v = BigInt(q.feePerUnitGas);
+  return v > 10n ** 15n ? (Number(v * 1000n / PAR) / 1000).toFixed(3) + " ×" : v.toString();
+}
+
+function render() {
+  const s = JSON.parse(client.status());
+  const auth = JSON.parse(client.authorizedFees());
+  $("status").textContent =
+    `${Math.round((Date.now() - started) / 1000)} s, ` +
+    (s ? `connected ${s.connectedPeers}, service nodes ${s.servicePeers}, filter subscriptions ${s.filterSubscriptions}` : "starting") +
+    `\n${accepted} announcement(s) accepted, ${client.trustedSigners()} trusted signer(s), ` +
+    (auth.length ? `authorized: ${auth.map((a) => a.token.slice(0, 8) + "… " + rate(a)).join(", ")}` : "no authorized rate yet") +
+    (lastTick ? `\nlast tick: ${lastTick}` : "") + (s && s.lastError ? `\nlast error: ${s.lastError}` : "");
+  const quotes = JSON.parse(client.quotes()).sort((a, b) => a.token.localeCompare(b.token) || (BigInt(a.feePerUnitGas) < BigInt(b.feePerUnitGas) ? -1 : 1));
+  $("rows").replaceChildren(...quotes.map((q) => {
+    const tr = document.createElement("tr");
+    const cells = [
+      [q.railgunAddress.slice(0, 14) + "…" + q.railgunAddress.slice(-4), "mono"], [q.identifier || "-"],
+      [q.token.slice(0, 10) + "…", "mono"], [rate(q), "num"], [String(q.availableWallets), "num"],
+      [String(q.reliability), "num"], [q.version], [Math.max(0, Math.round((q.expiration - Date.now()) / 1000)) + " s", "num"],
+    ];
+    for (const [text, cls] of cells) { const td = document.createElement("td"); td.textContent = text; if (cls) td.className = cls; tr.append(td); }
+    return tr;
+  }));
+}
+
+async function tick() {
+  try { accepted += await client.tick(); lastTick = "ok"; }
+  catch (e) { lastTick = String(e); }
+  render();
+}
+
+await init();
+$("start").onclick = () => {
+  if (timer) clearInterval(timer);
+  if (client) client.free();
+  accepted = 0; lastTick = ""; started = Date.now();
+  client = new WebBroadcasters(Number($("chain").value), $("trusted").checked);
+  timer = setInterval(tick, 3000); tick();
+  $("stop").disabled = false;
+};
+$("stop").onclick = () => {
+  if (timer) clearInterval(timer); timer = null;
+  if (client) { client.free(); client = null; }
+  $("stop").disabled = true; $("status").textContent = "stopped"; $("rows").replaceChildren();
+};
+</script>
+</body>
+</html>
