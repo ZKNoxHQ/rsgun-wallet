@@ -537,7 +537,7 @@ impl Engine {
     }
 
     async fn unlock(&mut self, p: UnlockParams) -> Result<()> {
-        let chain = ChainConfig::from_chain_id(p.chain_id)
+        let chain = railgun_chains::from_chain_id(p.chain_id)
             .ok_or_else(|| anyhow!("unsupported chain id {}", p.chain_id))?;
 
         // Chain-agnostic address, as Railway displays it: the chain field of a 0zk address is

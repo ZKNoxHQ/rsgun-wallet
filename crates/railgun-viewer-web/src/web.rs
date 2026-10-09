@@ -14,7 +14,7 @@ use futures::{
     channel::{mpsc, oneshot},
 };
 use kv_store_js::JsKvStore;
-use railgun::{builder::RailgunBuilder, chain_config::ChainConfig};
+use railgun::builder::RailgunBuilder;
 use railgun_broadcaster::{BroadcasterClient, BrowserBridge, WakuTransport};
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -165,7 +165,7 @@ impl Actor {
     }
 
     async fn unlock(&mut self, p: UnlockParams) -> Result<()> {
-        let chain = ChainConfig::from_chain_id(p.chain_id)
+        let chain = railgun_chains::from_chain_id(p.chain_id)
             .ok_or_else(|| anyhow!("unsupported chain id {}", p.chain_id))?;
         let resolved = keys::resolve(&p.credentials())?;
         let mode = resolved.mode();
@@ -185,7 +185,7 @@ impl Actor {
         }
 
         let (signer, _scheme) =
-            session::make_signer(resolved, keys::non_empty(&p.address), &chain, &provider, &self.shared).await?;
+            session::make_signer(resolved, keys::non_empty(&p.address), &chain, &self.shared).await?;
         let address = signer.address();
 
         // One IndexedDB database per chain and account, named like the daemon's data directory.
@@ -254,7 +254,12 @@ impl Actor {
             s.updated_at = now_ms();
         }
         log(&self.shared, "sync: scanning commitments, nullifiers and POI statuses…");
-        match session.railgun.sync().await {
+        let res = session::sync_with_progress(session, &self.shared).await;
+        if let Ok(mut s) = self.shared.lock() {
+            s.stage = None;
+            s.stage_detail = None;
+        }
+        match res {
             Ok(()) => log(&self.shared, format!("✓ synced to block {}", session.railgun.synced_block())),
             Err(e) => self.set_error(format!("sync failed: {e:#}")),
         }

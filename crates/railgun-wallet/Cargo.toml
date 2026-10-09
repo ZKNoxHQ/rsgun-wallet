@@ -35,6 +35,7 @@ hex = { workspace = true }
 hmac = "0.12"
 kohaku-kv-store = { workspace = true }
 railgun = { workspace = true }
+railgun-chains = { workspace = true }
 railgun-broadcaster = { path = "../railgun-broadcaster" }
 railgun-ledger = { workspace = true, features = ["usb", "ble"] }
 rand = { workspace = true }

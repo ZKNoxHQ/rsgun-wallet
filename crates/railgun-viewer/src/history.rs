@@ -5,7 +5,7 @@
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 use crate::chain::{ChainRef, TokenMeta, UnshieldRef};
@@ -42,8 +42,9 @@ pub struct SentIn {
     pub blinded: String,
 }
 
-/// One of our own operations, as the txid indexer keeps it.
-#[derive(Clone, Debug, Serialize)]
+/// One of our own operations, as the txid indexer keeps it, or found from our nullifiers on the
+/// subsquid (`from_chain`).
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OpIn {
     pub railgun_txid: String,
@@ -55,6 +56,8 @@ pub struct OpIn {
     pub utxo_tree_out: u32,
     pub utxo_out_start_index: u32,
     pub has_unshield: bool,
+    #[serde(default)]
+    pub from_chain: bool,
 }
 
 pub struct Input {
@@ -124,7 +127,8 @@ pub struct UnshieldView {
 #[serde(rename_all = "camelCase")]
 pub struct TxView {
     pub id: String,
-    /// shield | transact | unshield | receive
+    /// shield | transact | unshield | receive | relay (unshield → swap → shield in one transaction)
+    /// | spend (spent notes whose operation was not found)
     pub kind: &'static str,
     pub emitted: bool,
     pub railgun_txid: Option<String>,
@@ -200,6 +204,51 @@ fn meta<'a>(input: &'a Input, token: &Option<String>) -> (String, u8) {
                 .unwrap_or_else(|| "?".into()),
             18,
         ),
+    }
+}
+
+fn unshield_views(input: &Input, list: Option<&Vec<&UnshieldRef>>) -> Vec<UnshieldView> {
+    list.map(|list| {
+        list.iter()
+            .map(|u| {
+                let (symbol, decimals) = meta(input, &u.token_address);
+                UnshieldView {
+                    to: u.to.clone(),
+                    token: u.token_address.clone(),
+                    symbol,
+                    decimals,
+                    amount: u.amount.clone(),
+                    fee: u.fee.clone(),
+                }
+            })
+            .collect()
+    })
+    .unwrap_or_default()
+}
+
+/// Adds one of our notes as an output of `t` (totals, memo, best POI per list).
+fn attach_output(t: &mut TxView, n: &NoteView) {
+    t.outputs.push(n.hash.clone());
+    if !n.memo.is_empty() {
+        t.memos.push(n.memo.clone());
+    }
+    if let Some(tot) = t.totals.iter_mut().find(|x| x.symbol == n.symbol) {
+        let v = tot.value_out.parse::<u128>().unwrap_or(0) + n.value.parse::<u128>().unwrap_or(0);
+        tot.value_out = v.to_string();
+    } else {
+        t.totals.push(TxTotal {
+            symbol: n.symbol.clone(),
+            decimals: n.decimals,
+            value_in: "0".into(),
+            value_out: n.value.clone(),
+            unshield: "0".into(),
+        });
+    }
+    for (l, s) in &n.pois {
+        let cur = t.pois.entry(l.clone()).or_insert_with(|| "Unknown".into());
+        if rank(s) < rank(cur) || cur == "Unknown" {
+            *cur = s.clone();
+        }
     }
 }
 
@@ -346,25 +395,7 @@ pub fn build(input: &Input) -> History {
             .or_else(|| op.commitments.iter().find_map(|c| input.commitment_refs.get(c)));
         let transaction_hash = r.and_then(|r| r.transaction_hash.clone()).map(|t| t.to_ascii_lowercase());
         let timestamp = r.and_then(|r| r.timestamp);
-        let unshields: Vec<UnshieldView> = transaction_hash
-            .as_deref()
-            .and_then(|t| unshields_by_tx.get(t))
-            .map(|list| {
-                list.iter()
-                    .map(|u| {
-                        let (symbol, decimals) = meta(input, &u.token_address);
-                        UnshieldView {
-                            to: u.to.clone(),
-                            token: u.token_address.clone(),
-                            symbol,
-                            decimals,
-                            amount: u.amount.clone(),
-                            fee: u.fee.clone(),
-                        }
-                    })
-                    .collect()
-            })
-            .unwrap_or_default();
+        let unshields = unshield_views(input, transaction_hash.as_deref().and_then(|t| unshields_by_tx.get(t)));
         // totals per symbol
         let mut totals: BTreeMap<String, (u8, u128, u128, u128)> = BTreeMap::new();
         for h in &inputs {
@@ -427,6 +458,7 @@ pub fn build(input: &Input) -> History {
             }).collect::<Vec<_>>(),
             "unshieldStatuses": input.unshield_statuses.get(&op.railgun_txid),
             "recoveredValid": recovered,
+            "fromChain": op.from_chain,
             "listKeys": input.list_keys,
         });
         let poi_missing_lists: Vec<String> = pois
@@ -476,6 +508,74 @@ pub fn build(input: &Input) -> History {
             debug,
         });
     }
+    // spent notes no operation accounts for (the operation lookup by nullifier failed or is still
+    // pending): one row per spending transaction when its hash is known, else per note. The spend
+    // itself is certain: the nullifier, computed from the viewing key, is on chain.
+    let covered: HashSet<&str> = input.ops.iter().flat_map(|o| o.nullifiers.iter().map(String::as_str)).collect();
+    let mut orphan: BTreeMap<String, Vec<&NoteView>> = BTreeMap::new();
+    for n in notes.iter().filter(|n| n.mine && n.spent) {
+        let Some(nf) = n.nullifier.as_deref() else { continue };
+        if covered.contains(nf) {
+            continue;
+        }
+        let key = input
+            .nullifier_refs
+            .get(nf)
+            .and_then(|r| r.transaction_hash.clone())
+            .map(|t| t.to_ascii_lowercase())
+            .unwrap_or_else(|| format!("note:{}", n.hash));
+        orphan.entry(key).or_default().push(n);
+    }
+    for (key, spent) in orphan {
+        let r = spent[0].nullifier.as_deref().and_then(|nf| input.nullifier_refs.get(nf));
+        let transaction_hash = r.and_then(|r| r.transaction_hash.clone()).map(|t| t.to_ascii_lowercase());
+        let unshields = unshield_views(input, transaction_hash.as_deref().and_then(|t| unshields_by_tx.get(t)));
+        let mut totals: BTreeMap<String, (u8, u128, u128)> = BTreeMap::new();
+        for n in &spent {
+            let e = totals.entry(n.symbol.clone()).or_insert((n.decimals, 0, 0));
+            e.1 += n.value.parse::<u128>().unwrap_or(0);
+        }
+        for u in &unshields {
+            let e = totals.entry(u.symbol.clone()).or_insert((u.decimals, 0, 0));
+            e.2 += u.amount.parse::<u128>().unwrap_or(0) + u.fee.parse::<u128>().unwrap_or(0);
+        }
+        let inputs: Vec<String> = spent.iter().map(|n| n.hash.clone()).collect();
+        let memos: Vec<String> = spent.iter().map(|n| n.memo.clone()).filter(|m| !m.is_empty()).collect();
+        txs.push(TxView {
+            id: format!("spend:{key}"),
+            kind: if unshields.is_empty() { "spend" } else { "unshield" },
+            emitted: true,
+            railgun_txid: None,
+            transaction_hash,
+            block_number: r.map(|r| r.block_number),
+            timestamp: r.and_then(|r| r.timestamp),
+            debug: json!({
+                "spentWithoutOperation": inputs,
+                "why": "spent (nullifier on chain) but the spending operation was not found on the subsquid",
+            }),
+            inputs,
+            outputs: vec![],
+            unknown_inputs: 0,
+            unknown_outputs: 0,
+            unshields,
+            memos,
+            totals: totals
+                .into_iter()
+                .map(|(symbol, (decimals, i, u))| TxTotal {
+                    symbol,
+                    decimals,
+                    value_in: i.to_string(),
+                    value_out: "0".into(),
+                    unshield: u.to_string(),
+                })
+                .collect(),
+            pois: input.list_keys.iter().map(|k| (k.clone(), "Unknown".to_string())).collect(),
+            poi_submitted: false,
+            poi_missing_lists: vec![],
+            poi_pending: false,
+        });
+    }
+
     // shields and third-party receipts: one entry per note without an own operation
     for n in &notes {
         if !n.mine {
@@ -486,33 +586,26 @@ pub fn build(input: &Input) -> History {
             continue;
         }
         let is_shield = n.origin == "shield";
+        // created in the same Ethereum transaction as one of our spends: a cross-contract call
+        // (unshield to RelayAdapt, swap, shield back) or change of an operation found by nullifier
+        if let Some(h) = n.transaction_hash.as_deref().map(str::to_ascii_lowercase) {
+            if let Some(t) = txs
+                .iter_mut()
+                .find(|t| t.emitted && t.transaction_hash.as_deref() == Some(h.as_str()))
+            {
+                attach_output(t, n);
+                if is_shield {
+                    t.kind = "relay";
+                }
+                continue;
+            }
+        }
         let id = n
             .created_by
             .clone()
             .unwrap_or_else(|| format!("receive:{}", n.hash));
         if let Some(t) = txs.iter_mut().find(|t| t.id == id) {
-            t.outputs.push(n.hash.clone());
-            if !n.memo.is_empty() {
-                t.memos.push(n.memo.clone());
-            }
-            if let Some(tot) = t.totals.iter_mut().find(|x| x.symbol == n.symbol) {
-                let v = tot.value_out.parse::<u128>().unwrap_or(0) + n.value.parse::<u128>().unwrap_or(0);
-                tot.value_out = v.to_string();
-            } else {
-                t.totals.push(TxTotal {
-                    symbol: n.symbol.clone(),
-                    decimals: n.decimals,
-                    value_in: "0".into(),
-                    value_out: n.value.clone(),
-                    unshield: "0".into(),
-                });
-            }
-            for (l, s) in &n.pois {
-                let cur = t.pois.entry(l.clone()).or_insert_with(|| "Unknown".into());
-                if rank(s) < rank(cur) || cur == "Unknown" {
-                    *cur = s.clone();
-                }
-            }
+            attach_output(t, n);
             continue;
         }
         txs.push(TxView {
@@ -553,7 +646,7 @@ pub fn build(input: &Input) -> History {
     // ---- missing POI on emitted transactions ----
     let missing_poi: Vec<MissingPoi> = txs
         .iter()
-        .filter(|t| t.emitted && !t.poi_submitted)
+        .filter(|t| t.emitted && !t.poi_submitted && t.railgun_txid.is_some())
         .map(|t| MissingPoi {
             tx_id: t.id.clone(),
             railgun_txid: t.railgun_txid.clone(),
@@ -619,7 +712,12 @@ fn graph_snapshot(input: &Input, notes: &[NoteView], txs: &[TxView]) -> Value {
         if n.mine {
             let mut r = base.clone();
             let created_rid = n.created_by.clone().filter(|c| !c.starts_with("shield:"));
-            r["spendtxid"] = json!(chain_txid_of(&n.spent_by));
+            r["spendtxid"] = json!(chain_txid_of(&n.spent_by).or_else(|| {
+                n.nullifier
+                    .as_deref()
+                    .and_then(|nf| input.nullifier_refs.get(nf))
+                    .and_then(|r| r.transaction_hash.clone())
+            }));
             r["nullifier"] = json!(n.nullifier);
             r["commitmentType"] = json!(if n.origin == "shield" { "ShieldCommitment" } else { "TransactCommitment" });
             r["transactCreationRailgunTxid"] = json!(created_rid);
@@ -676,4 +774,111 @@ fn graph_snapshot(input: &Input, notes: &[NoteView], txs: &[TxView]) -> Value {
         "explorer": input.explorer, "walletId": input.address, "listKeys": input.list_keys,
         "received": received, "sent": sent, "unshields": unshields, "railgunTxs": railgun_txs,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn h(n: u8) -> String {
+        format!("0x{:064x}", n)
+    }
+
+    fn note(n: u8, ctype: &str, spent: bool) -> NoteIn {
+        NoteIn {
+            hash: h(n),
+            tree: 0,
+            leaf: u32::from(n),
+            value: 1000,
+            token: Some("0x00000000000000000000000000000000000000aa".into()),
+            token_hash: h(200),
+            memo: String::new(),
+            commitment_type: ctype.into(),
+            npk: h(100 + n),
+            random: h(150 + n),
+            nullifier: h(50 + n),
+            blinded: h(80 + n),
+            spent,
+        }
+    }
+
+    fn cref(tx: &str) -> ChainRef {
+        ChainRef { block_number: 10, timestamp: Some(1), transaction_hash: Some(tx.into()) }
+    }
+
+    fn input(notes: Vec<NoteIn>, ops: Vec<OpIn>) -> Input {
+        Input {
+            address: "0zk".into(),
+            chain_id: 11155111,
+            explorer: String::new(),
+            list_keys: vec![],
+            notes,
+            sent: vec![],
+            ops,
+            statuses: HashMap::new(),
+            pending: vec![],
+            tokens_by_hash: HashMap::new(),
+            token_meta: HashMap::new(),
+            commitment_refs: HashMap::new(),
+            nullifier_refs: HashMap::new(),
+            unshields: vec![],
+            unshield_statuses: HashMap::new(),
+            recovered_valid: HashSet::new(),
+        }
+    }
+
+    /// Unshield to RelayAdapt, swap, shield back: one row, not a lone shield.
+    #[test]
+    fn shield_in_the_transaction_of_a_spend_is_a_relay() {
+        let spent = note(1, "Transact", true);
+        let back = note(2, "Shield", false);
+        let op = OpIn {
+            railgun_txid: h(9),
+            block_number: 10,
+            nullifiers: vec![spent.nullifier.clone()],
+            commitments: vec![h(99)],
+            bound_params_hash: h(0),
+            utxo_tree_in: 0,
+            utxo_tree_out: 0,
+            utxo_out_start_index: 0,
+            has_unshield: true,
+            from_chain: true,
+        };
+        let mut i = input(vec![spent.clone(), back.clone()], vec![op]);
+        i.nullifier_refs.insert(spent.nullifier.clone(), cref("0xABC"));
+        i.commitment_refs.insert(back.hash.clone(), cref("0xabc"));
+        let hist = build(&i);
+        let kinds: Vec<&str> = hist.transactions.iter().map(|t| t.kind).collect();
+        assert!(!kinds.contains(&"shield"), "{kinds:?}");
+        let t = hist.transactions.iter().find(|t| t.kind == "relay").expect("relay row");
+        assert_eq!(t.kind, "relay");
+        assert_eq!(t.inputs, vec![spent.hash]);
+        assert!(t.outputs.contains(&back.hash));
+    }
+
+    /// No operation found: the spends still show, per spending transaction.
+    #[test]
+    fn spent_notes_without_operation_are_listed() {
+        let a = note(1, "Transact", true);
+        let b = note(2, "Shield", true);
+        let mut i = input(vec![a.clone(), b.clone()], vec![]);
+        i.nullifier_refs.insert(a.nullifier.clone(), cref("0xdef"));
+        i.unshields.push(UnshieldRef {
+            transaction_hash: "0xdef".into(),
+            block_number: 10,
+            timestamp: Some(1),
+            to: "0x00000000000000000000000000000000000000bb".into(),
+            token_address: a.token.clone(),
+            amount: "990".into(),
+            fee: "10".into(),
+            event_log_index: None,
+        });
+        let hist = build(&i);
+        let un = hist.transactions.iter().find(|t| t.id == "spend:0xdef").expect("unshield row");
+        assert_eq!(un.kind, "unshield");
+        assert_eq!(un.inputs, vec![a.hash]);
+        let sp = hist.transactions.iter().find(|t| t.id == format!("spend:note:{}", b.hash)).expect("spend row");
+        assert_eq!(sp.kind, "spend");
+        assert!(hist.missing_poi.is_empty());
+    }
 }

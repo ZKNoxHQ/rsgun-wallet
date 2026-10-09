@@ -26,6 +26,7 @@ js-sys = { workspace = true }
 kohaku-kv-store = { workspace = true }
 kv-store-js = { workspace = true }
 railgun = { workspace = true }
+railgun-chains = { workspace = true }
 railgun-broadcaster = { path = "../railgun-broadcaster", features = ["light-node"] }
 railgun-ledger = { workspace = true, features = ["webusb", "webble"] }
 rand = { workspace = true }

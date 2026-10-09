@@ -167,7 +167,7 @@
   .tbl tr{cursor:pointer}.tbl tr:hover td{background:var(--creme)}.tbl tr.sel td{background:rgba(255,196,0,.14)}
   .tbl .dim,.nx-panel .dim{color:#8a8aa5;font-size:.68rem}
   .kind{display:inline-block;font-size:.7rem;font-weight:700;padding:2px 8px;border-radius:999px;background:var(--creme);color:var(--bleu)}
-  .kind.shield{background:rgba(225,0,15,.1);color:var(--rouge)}.kind.unshield{background:rgba(15,110,86,.13);color:var(--vert)}.kind.receive{background:rgba(184,134,11,.16);color:var(--ambre)}
+  .kind.shield{background:rgba(225,0,15,.1);color:var(--rouge)}.kind.unshield{background:rgba(15,110,86,.13);color:var(--vert)}.kind.receive{background:rgba(184,134,11,.16);color:var(--ambre)}.kind.relay{background:rgba(0,0,145,.1);color:var(--bleu)}.kind.spend{background:rgba(120,120,150,.15);color:#55557a}
   .memo{font-family:'JetBrains Mono',monospace;font-size:.72rem;color:#3a3a52}
   .memo-box{background:rgba(255,196,0,.14);border:1px solid rgba(255,196,0,.5);border-radius:10px;padding:8px 10px;margin-bottom:10px;font-family:'JetBrains Mono',monospace;font-size:.78rem;white-space:pre-wrap}
   hr.sep{border:0;border-top:1px dashed var(--ligne2);margin:6px 0}
@@ -191,7 +191,7 @@
   .vw-warnline{color:var(--rouge);font-weight:600}
   .vw-derived{display:flex;flex-wrap:wrap;gap:8px;align-items:center;font-size:.76rem;color:#55557a}
   .vw-derived code{font-family:'JetBrains Mono',monospace;font-size:.72rem;background:var(--creme);border-radius:5px;padding:2px 6px;word-break:break-all}
-.vw-key[hidden]{display:none}
+.vw-key[hidden],.vw-form label[hidden]{display:none}
 </style>
 </head>
 <body>
@@ -219,7 +219,8 @@
       <label>Key source
         <select id="vwMode">
           <option value="mnemonic">Mnemonic (derives both keys)</option>
-          <option value="viewing">Private viewing key only</option>
+          <option value="viewing+address">Private viewing key + 0zk address</option>
+          <option value="legacy">Legacy format (Railway shareable viewing key)</option>
         </select>
       </label>
       <label>Options
@@ -234,9 +235,14 @@
       <div class="vw-note vw-warnline">Sepolia only, for tests, never divulgate a real seed phrase here</div>
       <div class="vw-derived" id="vwDerived" hidden>viewing private key <code id="vwDerivedVk"></code> <button class="ghost" type="button" id="vwCopyVk">Copy</button> <span class="dim" id="vwDerivedAddr"></span></div>
     </div>
-    <div class="vw-key" data-mode="viewing" hidden>
+    <div class="vw-key" data-mode="viewing+address" hidden>
       <label>Private viewing key (32 bytes, hex)<input type="password" id="vwViewing" placeholder="0x…" spellcheck="false" autocomplete="off"/></label>
-      <div class="vw-note"><span id="vwKeyHint">With the 0zk address, the master public key is read from it and checked against the viewing key (no scan). Without it, it is recovered from the first transfer received in clear (full scan on the first load, then cached in the database).</span></div>
+      <label id="vwAddressLabel">0zk address<input type="text" id="vwAddress" placeholder="0zk1… (address of this viewing key)" spellcheck="false" autocomplete="off" autocapitalize="off"/></label>
+      <div class="vw-note"><span id="vwKeyHint"></span></div>
+    </div>
+    <div class="vw-key" data-mode="legacy" hidden>
+      <label>Legacy key (hex, as Railway exports it under "Private key")<input type="password" id="vwLegacy" placeholder="82a5767072697…" spellcheck="false" autocomplete="off" autocapitalize="off"/></label>
+      <div class="vw-note">Shareable viewing key of Railway and the community wallets: viewing private key and spending public key, encoded together. It cannot spend. The master public key is computed from it exactly (no scan); a leading "Private key:" label is accepted.</div>
     </div>
     <div class="vw-actions">
       <button id="vwLoad">Load</button>
@@ -373,7 +379,7 @@ const $=id=>document.getElementById(id);
 const esc=s=>String(s==null?"":s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 const short=(h,n)=>{if(!h)return"—";n=n||6;const s=String(h);return s.length<=2+n+4?s:s.slice(0,2+n)+"…"+s.slice(-4)};
 const POI_FR={Valid:"Valid",ProofSubmitted:"Proof submitted",Missing:"Missing",ShieldBlocked:"Blocked",Unknown:"Unknown"};
-const KIND_FR={shield:"Shield",transact:"Transfer",unshield:"Unshield",receive:"Receipt"};
+const KIND_FR={shield:"Shield",transact:"Transfer",unshield:"Unshield",receive:"Receipt",relay:"Unshield → swap → shield",spend:"Spend (operation not found)"};
 function fmtVal(v,dec,maxFrac){try{v=BigInt(v||0)}catch(_){return String(v)}dec=dec==null?18:Number(dec);maxFrac=maxFrac==null?6:maxFrac;const base=10n**BigInt(dec);const ip=v/base,fp=v%base;let fs=fp.toString().padStart(dec,"0");let cut=fs.slice(0,maxFrac);if(/^0*$/.test(cut)&&fp>0n){const i=fs.search(/[1-9]/);cut=fs.slice(0,Math.min(dec,i+3))}cut=cut.replace(/0+$/,"");return ip.toString()+(cut?","+cut:"")}
 const fmtTs=ts=>ts?new Date(Number(ts)*1000).toLocaleString("en-GB"):"—";
 const S={status:null,snap:null,updatedAt:0,view:"hist",sel:null,explorer:""};
@@ -391,9 +397,15 @@ function show(view){S.view=view;document.querySelectorAll("#onglets button").for
 
 async function api(path,body){const r=await fetch(path,body?{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(body)}:{method:path.startsWith("/api/lock")||path.startsWith("/api/sync")||path.startsWith("/api/refresh")?"POST":"GET"});return r.json()}
 
-function creds(){let mode=$("vwMode").value;const mn=$("vwMnemonic").value.trim(),vk=$("vwViewing").value.trim(),za=($("vwAddress")?$("vwAddress").value:"").trim();if(mode==="mnemonic"&&!mn&&vk)mode=za?"viewing+address":"viewing";if(mode!=="mnemonic"&&!vk&&mn)mode="mnemonic";const c={chainId:parseInt($("vwNet").value,10),rpcUrl:$("vwRpc").value.trim()||null,poi:$("vwPoi").checked,syncNow:true};if(mode==="mnemonic"){if(c.chainId!==11155111)throw new Error("mnemonic input is Sepolia only");if(!mn)throw new Error("enter a mnemonic or a private viewing key");c.mnemonic=mn;c.derivation=$("vwDeriv").value;c.index=parseInt($("vwIndex").value||"0",10)}else{if(!vk)throw new Error("enter a private viewing key or a mnemonic");c.viewingKey=vk;if(mode==="viewing+address"){if(!za)throw new Error('enter the 0zk address, or choose "Private viewing key only"');if(!/^0zk1[qpzry9x8gf2tvdw0s3jn54khce6mua7l]+$/.test(za.toLowerCase()))throw new Error("the 0zk address looks malformed");c.address=za}}return c}
+function creds(){let mode=$("vwMode").value;const mn=$("vwMnemonic").value.trim(),vk=$("vwViewing").value.trim(),za=$("vwAddress").value.trim(),lg=$("vwLegacy").value.trim();
+  const c={chainId:parseInt($("vwNet").value,10),rpcUrl:$("vwRpc").value.trim()||null,poi:$("vwPoi").checked,syncNow:true};
+  if(mode==="mnemonic"){if(c.chainId!==11155111)throw new Error("mnemonic input is Sepolia only");if(!mn)throw new Error("enter a mnemonic");c.mnemonic=mn;c.derivation=$("vwDeriv").value;c.index=parseInt($("vwIndex").value||"0",10);return c}
+  if(mode==="legacy"){if(!lg)throw new Error("paste the legacy key (hex starting with 82a5…)");c.shareableKey=lg;return c}
+  if(!vk)throw new Error("enter the private viewing key");c.viewingKey=vk;
+  if(!za)throw new Error('enter the 0zk address, or use the legacy format');if(!/^0zk1[qpzry9x8gf2tvdw0s3jn54khce6mua7l]+$/.test(za.toLowerCase()))throw new Error("the 0zk address looks malformed");c.address=za;
+  return c}
 
-async function load(){const b=$("vwLoad");b.disabled=true;try{const r=await api("/api/unlock",creds());if(!r.ok){log("✗ "+r.error);b.disabled=false;return}$("vwMnemonic").value="";$("vwViewing").value="";$("vwDerived").hidden=true;log("request accepted; follow the status line and the log")}catch(x){log("✗ "+x.message);b.disabled=false}}
+async function load(){const b=$("vwLoad");b.disabled=true;try{const r=await api("/api/unlock",creds());if(!r.ok){log("✗ "+r.error);b.disabled=false;return}$("vwMnemonic").value="";$("vwViewing").value="";$("vwLegacy").value="";$("vwDerived").hidden=true;log("request accepted; follow the status line and the log")}catch(x){log("✗ "+x.message);b.disabled=false}}
 
 async function poll(){try{const st=await api("/api/status");const changed=!S.status||st.updatedAt!==S.updatedAt;S.status=st;$("vwVer").textContent="railgun-viewer "+st.version;$("zk").textContent=st.address||"—";$("vwModeOut").textContent=st.mode||"—";$("scan").textContent=st.syncing?"syncing…":(st.syncedBlock||"—");$("status").textContent=st.stage?st.stage+(st.stageDetail?" · "+st.stageDetail:"")+"…":(st.lastError?"✗ "+st.lastError:(st.unlocked?"ready":"locked"));$("sync").disabled=!st.unlocked||st.syncing;$("vwLock").disabled=!st.unlocked;$("vwLoad").disabled=st.unlocked||!!st.stage;
   if(changed){S.updatedAt=st.updatedAt;const l=$("log");l.textContent=(st.log||[]).join("\n");l.scrollTop=l.scrollHeight;try{const h=await api("/api/health");renderHealth(h)}catch(_){}if(st.unlocked){const snap=await api("/api/snapshot");if(snap&&snap.transactions){S.snap=snap;S.explorer=snap.graph&&snap.graph.explorer||"";render();if(S.view==="notes"&&window.NoxakuNotes)window.NoxakuNotes.refresh()}}else{S.snap=null;render()}}}catch(x){/* serveur absent */}}
@@ -457,7 +469,9 @@ let deriveTimer=null;
 async function deriveFromMnemonic(){const m=$("vwMnemonic").value.trim();const box=$("vwDerived");if(!m||m.split(/\s+/).length<12){box.hidden=true;return}
   try{const r=await api("/api/derive",{mnemonic:m,derivation:$("vwDeriv").value,index:parseInt($("vwIndex").value||"0",10),chainId:parseInt($("vwNet").value,10)});if(!r.ok){box.hidden=true;return}$("vwDerivedVk").textContent=r.viewingKey;$("vwDerivedAddr").textContent=r.address?"· "+r.address:"";box.hidden=false}catch(_){box.hidden=true}}
 function scheduleDerive(){clearTimeout(deriveTimer);deriveTimer=setTimeout(deriveFromMnemonic,400)}
-function syncMnemonicGate(){const sepolia=$("vwNet").value==="11155111";const m=$("vwMnemonic");m.disabled=!sepolia;m.closest(".vw-key").classList.toggle("gated",!sepolia);if(!sepolia){m.value="";const opt=$("vwMode").querySelector('option[value="mnemonic"]');opt.disabled=true;if($("vwMode").value==="mnemonic"){$("vwMode").value="viewing";$("vwMode").dispatchEvent(new Event("change"))}}else{$("vwMode").querySelector('option[value="mnemonic"]').disabled=false}}
+const KEY_HINT={"viewing+address":"The master public key is read from the 0zk address and checked against the viewing key (no scan)."};
+function syncKeySource(){const m=$("vwMode").value;document.querySelectorAll(".vw-key").forEach(d=>d.hidden=!d.dataset.mode.split(" ").includes(m));$("vwDerivWrap").style.display=m==="mnemonic"?"":"none";$("vwAddressLabel").hidden=m!=="viewing+address";$("vwKeyHint").textContent=KEY_HINT[m]||""}
+function syncMnemonicGate(){const sepolia=$("vwNet").value==="11155111";const m=$("vwMnemonic");m.disabled=!sepolia;m.closest(".vw-key").classList.toggle("gated",!sepolia);if(!sepolia){m.value="";const opt=$("vwMode").querySelector('option[value="mnemonic"]');opt.disabled=true;if($("vwMode").value==="mnemonic"){$("vwMode").value="viewing+address";$("vwMode").dispatchEvent(new Event("change"))}}else{$("vwMode").querySelector('option[value="mnemonic"]').disabled=false}}
 function bind(){document.querySelectorAll("#onglets button").forEach(b=>b.onclick=()=>show(b.dataset.view));$("netRun").onclick=runHealth;syncMnemonicGate();
   ["vwMnemonic","vwDeriv","vwIndex"].forEach(id=>$(id).addEventListener("input",scheduleDerive));$("vwDeriv").addEventListener("change",scheduleDerive);
   $("vwCopyVk").onclick=()=>{navigator.clipboard&&navigator.clipboard.writeText($("vwDerivedVk").textContent).then(()=>log("viewing key copied"))};
@@ -465,7 +479,7 @@ function bind(){document.querySelectorAll("#onglets button").forEach(b=>b.onclic
   const onWakuSrc=()=>{if(wakuSrc()!=="tab")Waku.stop();else if(S.view==="net")Waku.ensure(parseInt($("vwNet").value,10))};
   $("netWaku").addEventListener("change",onWakuSrc);$("netSource").addEventListener("change",onWakuSrc);
   api("/api/defaults").then(d=>{if(!d||!d.nativeWaku){const o=$("netSource").querySelector('option[value="native"]');if(o){o.remove();onWakuSrc()}}}).catch(()=>{});
-  $("vwMode").onchange=()=>{const m=$("vwMode").value;document.querySelectorAll(".vw-key").forEach(d=>d.hidden=d.dataset.mode!==m);$("vwDerivWrap").style.display=m==="mnemonic"?"":"none"};
+  $("vwMode").onchange=syncKeySource;syncKeySource();
   $("vwLoad").onclick=load;
   $("vwShow").onclick=()=>document.querySelectorAll(".vw-key input").forEach(i=>{if(i.id!=="vwMnemonic")i.type=i.type==="password"?"text":"password"});
   $("sync").onclick=()=>api("/api/sync");
@@ -728,43 +742,5 @@ if(document.readyState==="complete")setTimeout(()=>{if(!S.bound){bindUI();S.boun
 window.NoxakuNotes={open,refresh:()=>refresh(!0),select:centerOn,state:S,_pure:{buildGraph,subgraph,collapseChains,components,layoutAll,renderSVG,fmtVal,bucketOf,worstPoi}};
 })();
 </script>
-<script>/*vw-keysrc-0.2.15*/(function(){
-var $=function(i){return document.getElementById(i)};
-var sel=$("vwMode"),mn=$("vwMnemonic"),vk=$("vwViewing");if(!sel||!mn||!vk)return;
-var VA="viewing+address";
-function opt(v){for(var i=0;i<sel.options.length;i++)if(sel.options[i].value===v)return sel.options[i];return null}
-var mo=opt("mnemonic");
-if(!opt(VA)){var o=new Option("Private viewing key + 0zk address",VA);if(mo&&mo.nextSibling)sel.insertBefore(o,mo.nextSibling);else sel.add(o)}
-var vo=null;for(var i=0;i<sel.options.length;i++){var x=sel.options[i];if(x.value!=="mnemonic"&&x.value!==VA){vo=x;break}}
-if(!vo){vo=new Option("Private viewing key only (on-chain scan)","viewing");sel.add(vo)}
-[opt(VA),vo].forEach(function(x){x.disabled=false;x.hidden=false});
-var inLabel=vk.closest("label"),lab=$("vwAddressLabel"),inp=$("vwAddress");
-if(!inp){lab=document.createElement("label");lab.id="vwAddressLabel";
- if(inLabel){lab.className=inLabel.className}else{var p=vk.previousElementSibling;if(p&&p.tagName==="LABEL")lab.className=p.className}
- inp=document.createElement("input");inp.id="vwAddress";inp.type="text";inp.className=vk.className;
- inp.spellcheck=false;inp.autocomplete="off";inp.setAttribute("autocapitalize","off");
- inp.placeholder="0zk1\u2026 (address of this viewing key)";
- lab.textContent="0zk address";lab.htmlFor="vwAddress";
- if(inLabel){lab.appendChild(inp);inLabel.insertAdjacentElement("afterend",lab)}
- else{vk.insertAdjacentElement("afterend",lab);lab.insertAdjacentElement("afterend",inp)}}
-var bm=mn.closest(".vw-key"),bv=vk.closest(".vw-key")||vk.parentElement;if(bm===bv)bm=null;
-var hint=$("vwKeyHint");
-var H1="The master public key is read from the 0zk address and checked against the viewing key (no scan).";
-var H2="The master public key is recovered from the first transfer received in clear (full scan on the first load, then cached in the database).";
-function show(el,on){if(!el)return;if(el.hidden===on)el.hidden=!on;var d=on?"":"none";if(el.style.display!==d)el.style.display=d}
-var last=null;
-function sync(){var m=sel.value;last=m;var isMn=m==="mnemonic",isVA=m===VA;
- show(bm,isMn);show(bv,!isMn);show(lab,isVA);if(!inLabel)show(inp,isVA);
- if(hint){var t=isVA?H1:H2;if(hint.textContent!==t)hint.textContent=t}}
-sel.addEventListener("change",function(){sync();setTimeout(sync,0)});
-var net=$("vwNet");if(net)net.addEventListener("change",function(){setTimeout(sync,0);setTimeout(sync,200)});
-setInterval(function(){if(sel.value!==last)sync()},300);
-if(typeof MutationObserver!=="undefined"){var ob=new MutationObserver(function(){var m=sel.value;
- if((bv&&bv.hidden!==(m==="mnemonic"))||(bm&&bm.hidden!==(m!=="mnemonic")))sync()});
- [bm,bv].forEach(function(b){if(b)ob.observe(b,{attributes:true,attributeFilter:["hidden","style"]})})}
-document.addEventListener("DOMContentLoaded",function(){setTimeout(sync,0)});
-window.addEventListener("load",function(){setTimeout(sync,0)});
-sync();
-})();</script>
 </body>
 </html>

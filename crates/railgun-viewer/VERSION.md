@@ -1,5 +1,39 @@
 # railgun-viewer — journal des versions
 
+## 0.2.23 — 2026-10-08
+
+### Corrigé
+- `sync failed: Utxo indexer error: Database error: Other error: number out of range` à chaque synchro d'un compte détenant une note de plus de 18,44 unités d'un jeton à 18 décimales (valeur `u128` au-delà de `u64::MAX`). Le SDK passait chaque état par `serde_json::Value`, qui ne sait pas représenter un tel entier : la sauvegarde du compte échouait, le bloc synchronisé n'était jamais enregistré et la synchro s'arrêtait avant le fournisseur POI, donc avant le txid indexer. Les opérations propres (unshields compris) manquaient pour cette raison sur ce compte. Les enveloppes de la base sont désormais écrites et lues directement depuis le type (même format sur disque, données existantes relues telles quelles).
+
+### Modifié
+- Source « Private viewing key only » retirée, ainsi que la découverte on-chain du master public key qu'elle déclenchait. Une clé de visualisation seule est refusée à l'unlock ; restent la mnémonique (Sepolia), la clé de visualisation avec l'adresse 0zk, et le format legacy. Voir ADR-016.
+
+### Ajouté
+- Progression de la synchro : la plage restante est synchronisée par étapes (environ 25, au moins 20 000 blocs chacune), chacune enregistrée par le SDK, avec dans la ligne d'état le pourcentage, le bloc atteint et le temps restant estimé (`syncing · 42 % · block … / … · ~3 min 05 s left`). Une plage courte se fait en une étape. Durée totale dans le Log. `session::sync_with_progress`, commun au daemon et à la version web.
+
+### SDK (crates/railgun)
+- `railgun_database.rs` : `serialize_envelope` / `deserialize_envelope` sans `serde_json::Value`, test sur une valeur de 56,5 WETH en wei et sur des données au format précédent.
+
+## 0.2.22 — 2026-10-08
+
+### Corrigé
+- Toutes les dépenses en « Spend (operation not found) », sans hash ni bloc : la recherche des nullifiers par valeur demandait aussi une forme sans zéros de tête coupée au chiffre hexadécimal près, donc de longueur impaire dès qu'un nullifier commence par un `0`. Une valeur `Bytes` impaire est invalide et fait échouer toute la requête (environ 40 % de risque avec 8 notes dépensées). La forme courte ne retire plus que des octets nuls entiers. Une requête refusée est rejouée nullifier par nullifier, et le Log indique combien de nullifiers restent introuvables.
+
+## 0.2.21 — 2026-10-08
+
+### Ajouté
+- Source de clé « Legacy format (Railway shareable viewing key) » : la clé que Railway exporte sous « Private key », hex d'un map msgpack `{vpriv, spub}` (`generateShareableViewingKey` de l'engine community). Le viewer en tire la clé privée de visualisation et la clé publique de dépense (point BabyJubJub au format `packPoint` de circomlib), donc le master public key exact, sans scan. Un libellé « Private key: » devant la valeur est accepté ; la même valeur collée dans le champ clé de visualisation est reconnue. Corps `shareableKey` de `POST /api/unlock` (alias `legacyKey`, `shareableViewingKey`). `SharedSigner` (vraie clé publique de dépense, ne signe pas). Voir ADR-014.
+- Historique sans dépendance au txid indexer : les opérations qui dépensent nos notes et que le txid indexer n'a pas retenues (POI coupée, nœud POI injoignable, trou de synchro) sont retrouvées par les nullifiers, calculés depuis la clé de visualisation : recherche du nullifier sur le subsquid (`nullifier_eq` combinés en `OR`), puis l'opération complète du bloc (`Transaction` avec `boundParamsHash`, txid recalculé), gardées dans le cache (`chainOps`). Les unshields apparaissent donc aussi en view-only. Voir ADR-015.
+- Si l'opération reste introuvable, chaque transaction de dépense apparaît quand même (type « Spend (operation not found) », ou « Unshield » si un event d'unshield est connu pour ce hash), sans entrer dans la liste des émissions sans POI.
+
+### Corrigé
+- « Shield » affiché pour un aller-retour RelayAdapt (unshield vers RelayAdapt, swap, shield de retour) : le shield reçu dans la même transaction Ethereum qu'une de nos dépenses est rattaché à cette dépense, type « Unshield → swap → shield » (`relay`).
+- Sélecteur de source de clé : options et blocs écrits dans la page (`data-mode` à plusieurs valeurs), le script d'appoint de la 0.2.15 est retiré. Réseau autre que Sepolia : bascule sur « viewing key + 0zk address ».
+
+### SDK (crates/railgun)
+- `SpendingPublicKey::{to_packed, from_packed}` (circomlib `packPoint` / `unpackPoint`), avec test aller-retour sur les deux signes de `x`.
+- `provider::railgun_txid_hex` : txid d'une opération lue sur un indexeur.
+
 ## 0.2.20 — 2026-09-25
 
 ### Ajouté

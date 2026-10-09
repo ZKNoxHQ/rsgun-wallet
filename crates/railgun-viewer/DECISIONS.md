@@ -1,5 +1,47 @@
 # railgun-viewer — décisions d'architecture
 
+## ADR-016 — Clé de visualisation seule retirée (amende ADR-010 et ADR-011)
+
+Contexte : sans adresse, le master public key était cherché sur la chaîne dans la première note
+de transfert reçue en clair. Parcours long, échec sur les comptes alimentés par des shields ou
+par des expéditeurs visibles, et résultat non garanti (un candidat forgé passe le contrôle de hash).
+
+Décision : une clé de visualisation n'est acceptée qu'avec l'adresse 0zk, ou sous le format
+legacy qui porte la clé publique de dépense. L'option est retirée du front et l'unlock la refuse.
+`RailgunBuilder::discover_master_key` reste dans le SDK, inutilisé par le viewer.
+
+## ADR-015 — Historique reconstruit depuis les nullifiers, sans dépendre du txid indexer
+
+Contexte : les opérations de l'historique venaient des `own_ops` du txid indexer, qui n'existent
+qu'avec la POI active et une synchro des txids sans trou. Un unshield pouvait donc manquer, et le
+shield de retour d'un aller-retour RelayAdapt apparaître seul, comme un shield.
+
+Décision : la clé de visualisation suffit à calculer les nullifiers de toutes nos notes. Une note
+dépensée dont aucune opération connue ne publie le nullifier déclenche une recherche sur le
+subsquid : le nullifier par valeur (`nullifier_eq` en `OR`, la forme non complétée aussi), puis
+l'opération complète du bloc (`Transaction`), dont le txid est recalculé comme le fait le txid
+indexer. Ces opérations sont traitées comme les autres (unshields, statuts POI par txid) et gardées
+dans le cache du viewer. Un shield reçu dans la même transaction Ethereum qu'une de nos dépenses
+est rattaché à cette dépense (`relay`).
+
+Conséquences : l'historique ne dépend plus de la POI ni du txid indexer, mais du subsquid. Si
+celui-ci ne répond pas, la dépense reste visible (type `spend`), sans montant d'unshield ni txid.
+
+## ADR-014 — Format legacy (clé partageable Railway) comme source de clé
+
+Contexte : Railway exporte sous « Private key » la clé partageable de l'engine community, hex d'un
+map msgpack `{vpriv, spub}`. Elle porte la clé publique de dépense en plus de la clé privée de
+visualisation.
+
+Décision : source de clé dédiée, et reconnaissance automatique dans le champ clé de visualisation.
+`spub` est décompressé (circomlib `unpackPoint` sur BabyJubJub) ; le signer `SharedSigner` porte la
+vraie clé publique de dépense et laisse le SDK calculer le master public key. Aucune vérification
+on-chain ni adresse nécessaire.
+
+Conséquences : c'est la source la plus sûre en view-only (master key exact, pas de scan, pas de
+candidat forgé possible). La vraie clé publique de dépense permettrait aussi de régénérer des
+preuves POI sans la clé de dépense (entrées du circuit POI), non exploité pour l'instant.
+
 ## ADR-013 — Waku Rust par défaut pour la sonde des broadcasters
 
 Contexte : la sonde passait par le nœud js-waku de la page (ou un nwaku REST). Le wallet 0.13 a

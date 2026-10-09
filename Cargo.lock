@@ -6367,6 +6367,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "railgun-chains"
+version = "0.1.0"
+dependencies = [
+ "alloy",
+ "kohaku-railgun",
+]
+
+[[package]]
 name = "railgun-ledger"
 version = "0.1.0"
 dependencies = [
@@ -6394,10 +6402,12 @@ dependencies = [
 
 [[package]]
 name = "railgun-viewer"
-version = "0.2.20"
+version = "0.2.23"
 dependencies = [
  "alloy",
  "anyhow",
+ "ark-bn254",
+ "ark-ff 0.6.0",
  "async-trait",
  "axum",
  "base64 0.22.1",
@@ -6405,9 +6415,11 @@ dependencies = [
  "kohaku-crypto",
  "kohaku-railgun",
  "railgun-broadcaster",
+ "railgun-chains",
  "railgun-wallet",
  "rand 0.10.3",
  "reqwest",
+ "ruint",
  "serde",
  "serde_json",
  "sha2 0.10.9",
@@ -6418,10 +6430,12 @@ dependencies = [
 
 [[package]]
 name = "railgun-viewer-web"
-version = "0.1.4"
+version = "0.1.7"
 dependencies = [
  "alloy",
  "anyhow",
+ "ark-bn254",
+ "ark-ff 0.6.0",
  "async-trait",
  "base64 0.22.1",
  "bip32",
@@ -6436,8 +6450,10 @@ dependencies = [
  "kohaku-railgun",
  "kv-store-js",
  "railgun-broadcaster",
+ "railgun-chains",
  "rand 0.10.3",
  "reqwest",
+ "ruint",
  "serde",
  "serde_json",
  "sha2 0.10.9",
@@ -6466,6 +6482,7 @@ dependencies = [
  "kohaku-railgun",
  "kohaku-userop-kit",
  "railgun-broadcaster",
+ "railgun-chains",
  "railgun-ledger",
  "rand 0.10.3",
  "reqwest",
@@ -6499,6 +6516,7 @@ dependencies = [
  "kohaku-userop-kit",
  "kv-store-js",
  "railgun-broadcaster",
+ "railgun-chains",
  "railgun-ledger",
  "rand 0.10.3",
  "reqwest",

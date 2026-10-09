@@ -383,7 +383,7 @@ impl Actor {
     }
 
     async fn unlock(&mut self, p: UnlockParams) -> Result<()> {
-        let mut chain = ChainConfig::from_chain_id(p.chain_id)
+        let mut chain = railgun_chains::from_chain_id(p.chain_id)
             .ok_or_else(|| anyhow!("unsupported chain id {}", p.chain_id))?;
 
         // ppoi.fdi.network publishes an IPv6 address that refuses connections: IPv6-only networks

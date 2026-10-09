@@ -148,6 +148,53 @@ pub struct OpRef {
     pub unshield_value: Option<String>,
 }
 
+/// A full operation as the subsquid `Transaction` entity stores it: enough to compute its railgun
+/// txid, for operations spending our notes that the txid indexer did not retain.
+#[derive(Clone, Debug)]
+pub struct ChainOp {
+    pub transaction_hash: String,
+    pub block_number: u64,
+    pub timestamp: Option<u64>,
+    /// `0x` + 64 hex digits
+    pub nullifiers: Vec<String>,
+    pub commitments: Vec<String>,
+    pub bound_params_hash: String,
+    pub utxo_tree_in: u32,
+    pub utxo_tree_out: u32,
+    pub utxo_out_start_index: u32,
+    pub has_unshield: bool,
+}
+
+#[derive(Deserialize)]
+struct OperationsData {
+    transactions: Vec<SquidOperation>,
+}
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SquidOperation {
+    transaction_hash: String,
+    block_number: String,
+    block_timestamp: Option<String>,
+    #[serde(default)]
+    nullifiers: Vec<String>,
+    #[serde(default)]
+    commitments: Vec<String>,
+    bound_params_hash: String,
+    utxo_tree_in: Value,
+    utxo_tree_out: Value,
+    utxo_batch_start_position_out: Value,
+    #[serde(default)]
+    has_unshield: Option<bool>,
+}
+
+fn value_u32(v: &Value) -> u32 {
+    match v {
+        Value::Number(n) => n.as_u64().unwrap_or_default() as u32,
+        Value::String(s) => s.trim().parse().unwrap_or_default(),
+        _ => 0,
+    }
+}
+
 /// Subsquid lookups, best effort: any failure leaves the entry absent and is reported through
 /// `errors()` so the UI log shows it.
 pub struct Squid {
@@ -396,6 +443,98 @@ impl Squid {
                     }
                 }
                 Err(e) => self.report("nullifiers", &e),
+            }
+        }
+        out
+    }
+
+    /// Nullifier (0x + 64 hex) -> chain reference, looked up by value. `Bytes` fields have no
+    /// `_in` filter on this squid but have `_eq`, combined here with `OR` (50 per request). The
+    /// form without leading zero bytes is asked too when it differs (always an even number of hex
+    /// digits: an odd one is invalid `Bytes` and fails the whole request). A request that fails is
+    /// retried nullifier by nullifier, so one bad entry cannot hide the others.
+    pub async fn nullifiers_by_value(&self, nullifiers: &[String]) -> HashMap<String, ChainRef> {
+        const Q: &str = "query Q($w: [NullifierWhereInput!]) { nullifiers(where: {OR: $w}, limit: 1000) \
+                         { nullifier blockNumber blockTimestamp transactionHash } }";
+        fn forms(n: &str) -> Vec<Value> {
+            let padded = norm_hex(n);
+            let mut digits = padded.trim_start_matches("0x");
+            while digits.len() > 2 && digits.starts_with("00") {
+                digits = &digits[2..];
+            }
+            let bare = format!("0x{digits}");
+            let mut v = vec![json!({ "nullifier_eq": padded })];
+            if bare != padded {
+                v.push(json!({ "nullifier_eq": bare }));
+            }
+            v
+        }
+        let mut out = HashMap::new();
+        let keep = |data: NullifiersData, out: &mut HashMap<String, ChainRef>| {
+            for n in data.nullifiers {
+                out.insert(
+                    norm_hex(&n.nullifier),
+                    ChainRef {
+                        block_number: parse_u64(&n.block_number).unwrap_or_default(),
+                        timestamp: n.block_timestamp.as_deref().and_then(parse_u64),
+                        transaction_hash: n.transaction_hash,
+                    },
+                );
+            }
+        };
+        for chunk in nullifiers.chunks(50) {
+            let wh: Vec<Value> = chunk.iter().flat_map(|n| forms(n)).collect();
+            match self.query::<NullifiersData>(Q, json!({ "w": wh })).await {
+                Ok(data) => keep(data, &mut out),
+                Err(e) => {
+                    self.report("nullifiers by value", &e);
+                    for n in chunk {
+                        match self.query::<NullifiersData>(Q, json!({ "w": forms(n) })).await {
+                            Ok(data) => keep(data, &mut out),
+                            Err(e) => self.report(&format!("nullifier {}", &n[..10.min(n.len())]), &e),
+                        }
+                    }
+                }
+            }
+        }
+        let missing = nullifiers.iter().filter(|n| !out.contains_key(&norm_hex(n))).count();
+        if missing > 0 {
+            let msg = format!("{missing} of {} spent note nullifier(s) not found on the subsquid", nullifiers.len());
+            tracing::warn!("{msg}");
+            if let Ok(mut v) = self.errors.lock() {
+                v.push(format!("subsquid: {msg}"));
+            }
+        }
+        out
+    }
+
+    /// Full operations mined in the given blocks (`Transaction` entity with the fields of the
+    /// SDK's txid syncer).
+    pub async fn operations_at(&self, blocks: &[u64]) -> Vec<ChainOp> {
+        let mut out = Vec::new();
+        for chunk in blocks.chunks(100) {
+            let b: Vec<String> = chunk.iter().map(|x| x.to_string()).collect();
+            let q = "query Q($b: [BigInt!]) { transactions(where: {blockNumber_in: $b}, limit: 1000) \
+                     { transactionHash blockNumber blockTimestamp nullifiers commitments boundParamsHash \
+                       utxoTreeIn utxoTreeOut utxoBatchStartPositionOut hasUnshield } }";
+            match self.query::<OperationsData>(q, json!({ "b": b })).await {
+                Ok(data) => {
+                    for t in data.transactions {
+                        out.push(ChainOp {
+                            transaction_hash: t.transaction_hash.to_ascii_lowercase(),
+                            block_number: parse_u64(&t.block_number).unwrap_or_default(),
+                            timestamp: t.block_timestamp.as_deref().and_then(parse_u64),
+                            nullifiers: t.nullifiers.iter().map(|n| norm_any(n)).collect(),
+                            commitments: t.commitments.iter().map(|c| norm_any(c)).collect(),
+                            bound_params_hash: norm_any(&t.bound_params_hash),
+                            utxo_tree_in: value_u32(&t.utxo_tree_in),
+                            utxo_tree_out: value_u32(&t.utxo_tree_out),
+                            utxo_out_start_index: value_u32(&t.utxo_batch_start_position_out),
+                            has_unshield: t.has_unshield.unwrap_or(false),
+                        });
+                    }
+                }
+                Err(e) => self.report("operations", &e),
             }
         }
         out

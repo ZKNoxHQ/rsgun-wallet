@@ -1,0 +1,12 @@
+[package]
+name = "railgun-chains"
+version = "0.1.0"
+edition = "2024"
+description = "Railgun V2 deployments known to the ZKNOX apps, on top of the SDK's"
+
+[dependencies]
+alloy = { workspace = true }
+railgun = { workspace = true }
+
+[lints]
+workspace = true

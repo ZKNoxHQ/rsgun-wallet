@@ -3,6 +3,7 @@ members = [
     "crates/waku-light",
     "crates/railgun-broadcaster",
     "crates/kv-store-js",
+    "crates/railgun-chains",
     "crates/railgun-ledger",
     "crates/railgun-wallet",
     "crates/railgun-wallet-web",
@@ -27,6 +28,7 @@ userop-kit = { package = "kohaku-userop-kit", path = "../kohaku-rs/crates/userop
 
 # Product crates
 kv-store-js = { path = "./crates/kv-store-js" }
+railgun-chains = { path = "./crates/railgun-chains" }
 railgun-ledger = { path = "./crates/railgun-ledger" }
 
 aes-gcm = "0.10"

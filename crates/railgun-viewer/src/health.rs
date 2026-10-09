@@ -13,7 +13,6 @@ use alloy::{
     network::Ethereum,
     providers::{Provider, ProviderBuilder},
 };
-use railgun::chain_config::ChainConfig;
 use railgun_broadcaster::{BroadcasterClient, NwakuRest};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -194,7 +193,7 @@ pub async fn run(
     bridge: Option<Arc<BroadcasterClient>>,
     native: Option<Arc<BroadcasterClient>>,
 ) -> HealthReport {
-    let chain = ChainConfig::from_chain_id(p.chain_id);
+    let chain = railgun_chains::from_chain_id(p.chain_id);
     let client = http_client();
 
     // ---- RPC ----

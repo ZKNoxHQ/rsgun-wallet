@@ -2,14 +2,14 @@
 //! are not `Send`). Commands arrive over a channel; results land in `Shared`. The session logic
 //! itself lives in `session.rs`, shared with the web build.
 
-use std::{path::PathBuf, sync::Arc};
+use std::path::PathBuf;
 
 use alloy::{
     network::Ethereum,
     providers::{Provider, ProviderBuilder},
 };
 use anyhow::{Context, Result, anyhow, bail};
-use railgun::{builder::RailgunBuilder, chain_config::ChainConfig};
+use railgun::builder::RailgunBuilder;
 use railgun_wallet::db;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -175,7 +175,7 @@ impl Actor {
     }
 
     async fn unlock(&mut self, p: UnlockParams) -> Result<()> {
-        let chain = ChainConfig::from_chain_id(p.chain_id)
+        let chain = railgun_chains::from_chain_id(p.chain_id)
             .ok_or_else(|| anyhow!("unsupported chain id {}", p.chain_id))?;
         let resolved = keys::resolve(&p.credentials())?;
         let mode = resolved.mode();
@@ -192,7 +192,7 @@ impl Actor {
         }
 
         let (signer, scheme) =
-            session::make_signer(resolved, keys::non_empty(&p.address), &chain, &provider, &self.shared).await?;
+            session::make_signer(resolved, keys::non_empty(&p.address), &chain, &self.shared).await?;
         let address = signer.address();
 
         // Same layout as railgun-wallet: <data-dir>/<chain>/<sha256(address)[..8]>/db-v3.redb.
@@ -252,7 +252,11 @@ impl Actor {
             s.updated_at = now_ms();
         }
         log(&self.shared, "sync: scanning commitments, nullifiers and POI statuses…");
-        let res = session.railgun.sync().await;
+        let res = session::sync_with_progress(session, &self.shared).await;
+        if let Ok(mut s) = self.shared.lock() {
+            s.stage = None;
+            s.stage_detail = None;
+        }
         match res {
             Ok(()) => log(
                 &self.shared,

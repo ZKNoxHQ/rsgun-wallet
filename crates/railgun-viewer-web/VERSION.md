@@ -1,5 +1,17 @@
 # railgun-viewer-web — journal des versions
 
+## 0.1.7 — 2026-10-08
+
+- Suit le viewer 0.2.23 : sauvegarde IndexedDB des comptes à grosses notes corrigée (SDK), clé de visualisation seule retirée, progression de la synchro en pourcentage avec temps restant.
+
+## 0.1.6 — 2026-10-08
+
+- Suit le viewer 0.2.22 : recherche des nullifiers par valeur corrigée (forme impaire invalide), repli un par un.
+
+## 0.1.5 — 2026-10-08
+
+- Suit le viewer 0.2.21 (fichiers partagés) : format legacy Railway en saisie, opérations retrouvées par les nullifiers (unshields visibles en view-only), aller-retour RelayAdapt affiché comme tel.
+
 ## 0.1.4 — 2026-09-25
 
 - Avertissement du viewer 0.2.20 quand le réseau n'atteint pas le nœud POI (cas des réseaux mobiles IPv6 seuls avec ppoi.fdi.network), après l'unlock et dans la carte POI de l'onglet Network.

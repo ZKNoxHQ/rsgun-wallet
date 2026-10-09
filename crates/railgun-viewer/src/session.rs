@@ -7,7 +7,7 @@ use std::{collections::HashMap, sync::Arc};
 
 use alloy::{
     primitives::{Address, U256},
-    providers::DynProvider,
+    providers::{DynProvider, Provider},
 };
 use anyhow::{Result, anyhow, bail};
 use railgun::{
@@ -15,7 +15,6 @@ use railgun::{
         address::RailgunAddress,
         signer::{PrivateKeySigner as RgSigner, RailgunSigner},
     },
-    builder::RailgunBuilder,
     caip::AssetId,
     chain_config::ChainConfig,
     provider::{CommitmentKind, RailgunProvider, SentNote, UtxoNote, blinded_commitment},
@@ -28,7 +27,7 @@ use crate::{
     history::{self, NoteIn, OpIn, SentIn},
     keys::{self, Credentials, Resolved},
     shared::{SharedRef, log, now_ms},
-    signer::MasterSigner,
+    signer::{MasterSigner, SharedSigner},
     wallet_keys::Derivation,
 };
 
@@ -72,6 +71,9 @@ pub struct UnlockParams {
     /// spares the on-chain discovery scan. Ignored with a mnemonic.
     #[serde(default, alias = "zkAddress", alias = "railgunAddress")]
     pub address: Option<String>,
+    /// Legacy format (Railway / community engine shareable viewing key, msgpack `{vpriv, spub}`).
+    #[serde(default, alias = "legacyKey", alias = "shareableViewingKey", alias = "shareable_key")]
+    pub shareable_key: Option<String>,
     pub chain_id: u64,
     pub rpc_url: Option<String>,
     #[serde(default = "default_true")]
@@ -87,6 +89,7 @@ impl UnlockParams {
             index: self.index,
             derivation: self.derivation,
             viewing_key: self.viewing_key.clone(),
+            shareable_key: self.shareable_key.clone(),
         }
     }
 
@@ -94,8 +97,13 @@ impl UnlockParams {
     /// against the viewing key when both are given.
     pub fn precheck(&self) -> Result<()> {
         let r = keys::resolve(&self.credentials())?;
-        if let (Resolved::ViewOnly { viewing }, Some(a)) = (&r, keys::non_empty(&self.address)) {
-            keys::master_from_address(a, viewing)?;
+        if let Resolved::ViewOnly { viewing } = &r {
+            match keys::non_empty(&self.address) {
+                Some(a) => {
+                    keys::master_from_address(a, viewing)?;
+                }
+                None => bail!(NO_ADDRESS),
+            }
         }
         Ok(())
     }
@@ -103,10 +111,11 @@ impl UnlockParams {
     /// Lengths of what was received, for the log when the request is refused.
     pub fn lengths(&self) -> String {
         format!(
-            "unlock: received mnemonic={} viewingKey={} address={} (lengths)",
+            "unlock: received mnemonic={} viewingKey={} address={} legacyKey={} (lengths)",
             self.mnemonic.as_deref().map(str::len).unwrap_or(0),
             self.viewing_key.as_deref().map(str::len).unwrap_or(0),
-            self.address.as_deref().map(str::len).unwrap_or(0)
+            self.address.as_deref().map(str::len).unwrap_or(0),
+            self.shareable_key.as_deref().map(str::len).unwrap_or(0)
         )
     }
 
@@ -128,60 +137,91 @@ fn default_true() -> bool {
     true
 }
 
-fn set_stage(shared: &SharedRef, stage: Option<&'static str>) {
-    if let Ok(mut s) = shared.lock() {
-        s.stage = stage;
-        s.updated_at = now_ms();
-    }
-}
+/// A bare viewing key is refused: the on-chain discovery of the master public key (first transfer
+/// received in clear) was slow and unreliable, see ADR-016.
+const NO_ADDRESS: &str = "a private viewing key alone is not accepted: give the 0zk address with it, \
+or use the legacy format (Railway shareable viewing key)";
 
 /// Signer for the unlock request: full keys from a mnemonic, else a view-only signer whose master
-/// public key is read from the 0zk address or, without it, discovered on chain (full scan).
+/// public key is read from the 0zk address, or computed from the legacy format.
 pub async fn make_signer(
     resolved: Resolved,
     address: Option<&str>,
     chain: &ChainConfig,
-    provider: &DynProvider,
     shared: &SharedRef,
 ) -> Result<(Arc<dyn RailgunSigner>, &'static str)> {
     match resolved {
         Resolved::Full { spending, viewing, scheme } => Ok((RgSigner::new_evm(spending, viewing, chain.id), scheme)),
+        Resolved::Shared { viewing, spub } => {
+            let signer = SharedSigner::new(viewing, spub, chain.id);
+            if let Some(a) = address {
+                let given = keys::parse_address(a)?;
+                if given.to_string() != signer.address().to_string() {
+                    bail!("this legacy key does not belong to that 0zk address");
+                }
+            }
+            log(shared, "✓ legacy key: master public key computed from the spending public key and the viewing key (no scan)");
+            Ok((signer, "n/a"))
+        }
         Resolved::ViewOnly { viewing } if address.is_some() => {
             let master = keys::master_from_address(address.unwrap_or_default(), &viewing)?;
             log(shared, "✓ master public key read from the 0zk address (viewing key checked against it)");
             Ok((MasterSigner::new(viewing, master, chain.id), "n/a"))
         }
-        Resolved::ViewOnly { viewing } => {
-            // The master public key is not derivable from the viewing key: read it from the
-            // first transact note received in clear. Full scan on the first run only.
-            set_stage(shared, Some("discovering master key"));
-            log(shared, format!("view-only: looking for the master public key on chain (first transact note received), scanning from block {}…", chain.deployment_block));
-            let sh = shared.clone();
-            let t0 = now_ms();
-            let progress = move |to: u64, head: u64| {
-                if let Ok(mut s) = sh.lock() {
-                    s.stage_detail = Some(format!("block {to} / {head}"));
-                    s.updated_at = now_ms();
-                }
-                log(&sh, format!("view-only: scanned up to block {to} / {head} ({:.0} s)", (now_ms() - t0) as f64 / 1000.0));
-            };
-            let scan = RailgunBuilder::new(chain.clone(), provider.clone());
-            let found = scan
-                .discover_master_key(viewing, None, &progress)
-                .await
-                .map_err(|e| anyhow!("master key discovery: {e}"))?;
-            set_stage(shared, Some("unlocking"));
-            let Some((master, ts)) = found else {
-                bail!(
-                    "no transact note received in clear for this viewing key: the master public \
-                     key cannot be inferred (account with shields only, or senders that revealed \
-                     themselves). Provide the 0zk address with the viewing key."
-                );
-            };
-            log(shared, format!("✓ master public key found (note received at timestamp {ts})"));
-            Ok((MasterSigner::new(viewing, master, chain.id), "n/a"))
-        }
+        Resolved::ViewOnly { .. } => bail!(NO_ADDRESS),
     }
+}
+
+fn fmt_duration(ms: u64) -> String {
+    let s = ms / 1000;
+    match s {
+        0..=59 => format!("{s} s"),
+        60..=3599 => format!("{} min {:02} s", s / 60, s % 60),
+        _ => format!("{} h {:02} min", s / 3600, (s % 3600) / 60),
+    }
+}
+
+/// Sync with progress: the range from the last synced block to the head is synced in steps
+/// (about 25, at least 20 000 blocks each), each step persisted by the SDK, with percentage,
+/// block and estimated time left in the status line. A short range is a single step.
+pub async fn sync_with_progress(session: &mut Session, shared: &SharedRef) -> Result<()> {
+    let head = session.provider.get_block_number().await.map_err(|e| anyhow!("eth_blockNumber: {e}"))?;
+    let start = session.railgun.synced_block().max(session.chain.deployment_block.saturating_sub(1));
+    if head <= start {
+        return session.railgun.sync().await.map_err(|e| anyhow!("{e:#}"));
+    }
+    let total = head - start;
+    let step = (total / 25).max(20_000);
+    let t0 = now_ms();
+    let progress = |shared: &SharedRef, synced: u64| {
+        let done = synced.saturating_sub(start).min(total);
+        let pct = done * 100 / total;
+        let elapsed = now_ms().saturating_sub(t0);
+        let eta = if done > 0 && done < total {
+            format!(" · ~{} left", fmt_duration(elapsed.saturating_mul(total - done) / done))
+        } else {
+            String::new()
+        };
+        if let Ok(mut s) = shared.lock() {
+            s.stage = Some("syncing");
+            s.stage_detail = Some(format!("{pct} % · block {} / {head}{eta}", synced.max(start)));
+            s.updated_at = now_ms();
+        }
+    };
+    progress(shared, start);
+    let mut target = start;
+    while target < head {
+        target = (target + step).min(head);
+        session.railgun.sync_to(target).await.map_err(|e| anyhow!("{e:#}"))?;
+        progress(shared, session.railgun.synced_block());
+    }
+    // blocks mined while syncing
+    session.railgun.sync().await.map_err(|e| anyhow!("{e:#}"))?;
+    log(
+        shared,
+        format!("sync: {total} block(s) in {}", fmt_duration(now_ms().saturating_sub(t0))),
+    );
+    Ok(())
 }
 
 /// After unlock: says plainly when this network cannot reach the POI node (statuses would stay
@@ -219,6 +259,7 @@ pub struct Caches {
     pub nullifier_refs: HashMap<String, ChainRef>,
     pub poi_cache: PoiCache,
     pub op_refs: HashMap<String, OpRef>,
+    pub chain_ops: HashMap<String, OpIn>,
 }
 
 impl Caches {
@@ -231,6 +272,7 @@ impl Caches {
             nullifier_refs: take(v, "nullifiers"),
             poi_cache: take(v, "poi"),
             op_refs: take(v, "ops"),
+            chain_ops: take(v, "chainOps"),
         }
     }
 }
@@ -251,6 +293,9 @@ pub struct Session {
     pub poi_cache: PoiCache,
     /// railgun txid -> subsquid `Transaction` record (chain hash, timestamp, unshield preimage).
     pub op_refs: HashMap<String, OpRef>,
+    /// railgun txid -> operation spending our notes found from the nullifiers (not retained by the
+    /// txid indexer).
+    pub chain_ops: HashMap<String, OpIn>,
 }
 
 impl Session {
@@ -280,6 +325,7 @@ impl Session {
             nullifier_refs: caches.nullifier_refs,
             poi_cache: caches.poi_cache,
             op_refs: caches.op_refs,
+            chain_ops: caches.chain_ops,
         }
     }
 
@@ -289,6 +335,7 @@ impl Session {
             "nullifiers": self.nullifier_refs,
             "poi": self.poi_cache,
             "ops": self.op_refs,
+            "chainOps": self.chain_ops,
         })
     }
 
@@ -341,6 +388,99 @@ pub fn sent_in(s: &SentNote) -> SentIn {
     }
 }
 
+/// Operations spending our notes that the txid indexer did not retain (POI off, a txid sync gap,
+/// an unreachable POI node): the viewing key gives every nullifier, the subsquid the operation
+/// that published it (looked up by nullifier, then the full `Transaction` of that block). Kept in
+/// the viewer cache.
+async fn add_chain_ops(session: &mut Session, notes: &[NoteIn], ops: &mut Vec<OpIn>) {
+    let covered: std::collections::HashSet<String> =
+        ops.iter().flat_map(|o| o.nullifiers.iter().cloned()).collect();
+    let mut uncovered: Vec<String> = notes
+        .iter()
+        .filter(|n| n.spent && !covered.contains(&n.nullifier))
+        .map(|n| n.nullifier.clone())
+        .collect();
+    uncovered.sort();
+    uncovered.dedup();
+    if uncovered.is_empty() {
+        return;
+    }
+    let mut known: std::collections::HashSet<String> = ops.iter().map(|o| o.railgun_txid.clone()).collect();
+    for op in session.chain_ops.values() {
+        if op.nullifiers.iter().any(|n| uncovered.contains(n)) && known.insert(op.railgun_txid.clone()) {
+            ops.push(op.clone());
+        }
+    }
+    let covered: std::collections::HashSet<String> =
+        ops.iter().flat_map(|o| o.nullifiers.iter().cloned()).collect();
+    let rest: Vec<String> = uncovered.into_iter().filter(|n| !covered.contains(n)).collect();
+    if rest.is_empty() {
+        return;
+    }
+    let ask: Vec<String> = rest.iter().filter(|n| !session.nullifier_refs.contains_key(*n)).cloned().collect();
+    if !ask.is_empty() {
+        let found = session.squid.nullifiers_by_value(&ask).await;
+        session.nullifier_refs.extend(found);
+    }
+    let mut blocks: Vec<u64> = rest
+        .iter()
+        .filter_map(|n| session.nullifier_refs.get(n))
+        .map(|r| r.block_number)
+        .collect();
+    blocks.sort_unstable();
+    blocks.dedup();
+    if blocks.is_empty() {
+        tracing::warn!("{} spent note(s) without a known spending operation", rest.len());
+        return;
+    }
+    let parse = |h: &String| U256::from_str_radix(h.trim_start_matches("0x"), 16).ok();
+    let mut added = 0usize;
+    for c in session.squid.operations_at(&blocks).await {
+        if !c.nullifiers.iter().any(|n| rest.contains(n)) {
+            continue;
+        }
+        let (Some(nfs), Some(cms), Some(bph)) = (
+            c.nullifiers.iter().map(parse).collect::<Option<Vec<_>>>(),
+            c.commitments.iter().map(parse).collect::<Option<Vec<_>>>(),
+            parse(&c.bound_params_hash),
+        ) else {
+            continue;
+        };
+        let rid = railgun_txid_hex(&nfs, &cms, bph);
+        let cref = ChainRef {
+            block_number: c.block_number,
+            timestamp: c.timestamp,
+            transaction_hash: Some(c.transaction_hash.clone()),
+        };
+        for n in &c.nullifiers {
+            session.nullifier_refs.entry(n.clone()).or_insert_with(|| cref.clone());
+        }
+        for h in &c.commitments {
+            session.commitment_refs.entry(h.clone()).or_insert_with(|| cref.clone());
+        }
+        let op = OpIn {
+            railgun_txid: rid.clone(),
+            block_number: c.block_number,
+            nullifiers: c.nullifiers,
+            commitments: c.commitments,
+            bound_params_hash: c.bound_params_hash,
+            utxo_tree_in: c.utxo_tree_in,
+            utxo_tree_out: c.utxo_tree_out,
+            utxo_out_start_index: c.utxo_out_start_index,
+            has_unshield: c.has_unshield,
+            from_chain: true,
+        };
+        session.chain_ops.insert(rid.clone(), op.clone());
+        if known.insert(rid) {
+            ops.push(op);
+            added += 1;
+        }
+    }
+    if added > 0 {
+        tracing::info!("{added} operation(s) spending our notes found from their nullifiers");
+    }
+}
+
 pub async fn build_history(session: &mut Session) -> Result<history::History> {
     let state = session
         .railgun
@@ -351,7 +491,7 @@ pub async fn build_history(session: &mut Session) -> Result<history::History> {
     notes.extend(state.spent.iter().map(|n| note_in(n, true)));
     let sent: Vec<SentIn> = state.sent.iter().map(sent_in).collect();
 
-    let ops: Vec<OpIn> = session
+    let mut ops: Vec<OpIn> = session
         .railgun
         .own_operations()
         .into_iter()
@@ -365,8 +505,10 @@ pub async fn build_history(session: &mut Session) -> Result<history::History> {
             utxo_tree_out: op.utxo_tree_out,
             utxo_out_start_index: op.utxo_out_start_index,
             has_unshield: op.has_unshield,
+            from_chain: false,
         })
         .collect();
+    add_chain_ops(session, &notes, &mut ops).await;
 
     // POI statuses: the SDK only caches statuses it fetched merkle proofs for, so every note is
     // asked to the node here (per list), `Valid` answers being final and kept in the cache.
@@ -660,4 +802,38 @@ pub async fn build_history(session: &mut Session) -> Result<history::History> {
         );
     }
     Ok(h)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn bare_viewing_key_is_refused() {
+        let p: UnlockParams = serde_json::from_value(serde_json::json!({
+            "chainId": 11155111,
+            "viewingKey": format!("0x{}", "11".repeat(32)),
+        }))
+        .unwrap();
+        assert!(p.precheck().unwrap_err().to_string().contains("0zk address"));
+    }
+
+    #[test]
+    fn durations() {
+        assert_eq!(fmt_duration(42_000), "42 s");
+        assert_eq!(fmt_duration(185_000), "3 min 05 s");
+        assert_eq!(fmt_duration(3_900_000), "1 h 05 min");
+    }
+}
+
+/// Railgun txid (`0x` + 64 hex digits) of an operation read from an indexer (subsquid
+/// `Transaction`), for operations the txid indexer did not retain.
+fn railgun_txid_hex(
+    nullifiers: &[ruint::aliases::U256],
+    commitments: &[ruint::aliases::U256],
+    bound_params_hash: ruint::aliases::U256,
+) -> String {
+    let txid: ruint::aliases::U256 =
+        railgun::crypto::railgun_txid::Txid::new(nullifiers, commitments, bound_params_hash).into();
+    format!("0x{txid:064x}")
 }

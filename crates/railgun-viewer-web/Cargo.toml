@@ -1,6 +1,6 @@
 [package]
 name = "railgun-viewer-web"
-version = "0.1.4"
+version = "0.1.7"
 edition = "2024"
 description = "Dr Rail as a static web page: the railgun-viewer session core compiled to wasm and run in a Web Worker"
 publish = false
@@ -10,6 +10,9 @@ crate-type = ["cdylib", "rlib"]
 
 # Everything is wasm-only: on a native workspace build this crate is an empty library.
 [target.'cfg(target_arch = "wasm32")'.dependencies]
+ark-bn254 = { workspace = true }
+ark-ff = { workspace = true }
+ruint = { workspace = true }
 alloy = { workspace = true, default-features = true }
 anyhow = { workspace = true }
 async-trait = { workspace = true }
@@ -25,6 +28,7 @@ js-sys = { workspace = true }
 kohaku-kv-store = { workspace = true }
 kv-store-js = { workspace = true }
 railgun = { workspace = true }
+railgun-chains = { workspace = true }
 railgun-broadcaster = { path = "../railgun-broadcaster", features = ["light-node"] }
 rand = { workspace = true }
 reqwest = { workspace = true, features = ["json"] }
