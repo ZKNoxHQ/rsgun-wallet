@@ -1055,7 +1055,7 @@ impl Session {
                     SimpleSmartAccount::new(sender.address(), self.chain.id, Arc::new(self.provider.clone()));
                 let railgun_signer = self.signer.clone() as Arc<dyn RailgunSigner>;
                 let fee_token = self.chain.wrapped_base_token;
-                let (signable, mode) = if self.fee_limits.single_proof {
+                let (mut signable, mode) = if self.fee_limits.single_proof {
                     let margin_percent = self
                         .fee_limits
                         .gas_margin_percent
@@ -1139,6 +1139,9 @@ impl Session {
                     "fee {} wrapped token ({mode})",
                     trim_decimal(format_units(U256::from(max_fee), 18u8).unwrap_or_default())
                 ));
+                if let Some(warning) = refresh_priority_fee(&bundler, &mut signable).await {
+                    ctx.step(warning);
+                }
                 let signed = signable.sign(&sender).await?;
                 let hash = bundler.send_user_operation(&signed).await?;
                 ctx.step(format!("UserOperation {:?} sent, waiting for receipt", hash.0));
@@ -1757,6 +1760,36 @@ impl Session {
             updated_at: now_ms(),
         }
     }
+}
+
+/// Margin, in percent, added to the bundler's priority fee right before sending.
+const PRIORITY_FEE_MARGIN_PERCENT: u128 = 10;
+
+/// Brings the priority fee of a proved UserOperation up to the bundler's current price.
+///
+/// The price is read before proving; a proof (two on a re-prove, with Ledger signatures) can take
+/// long enough for the bundler's minimum to move (Pimlico refused 1,099,999,959 wei against a
+/// minimum of 1,099,999,962). Only `maxFeePerGas` enters the fee bound into the proof, so the
+/// priority fee can rise freely up to it without proving again. Returns a step to show when the
+/// price no longer fits under that cap.
+async fn refresh_priority_fee(
+    bundler: &PimlicoBundler,
+    signable: &mut userop_kit::signable_user_operation::SignableUserOperation,
+) -> Option<String> {
+    let Ok(Some(price)) = (bundler as &dyn Bundler).gas_price().await else {
+        return None;
+    };
+    let op = &mut signable.user_op;
+    let wanted = price.max_priority_fee_per_gas
+        + price.max_priority_fee_per_gas * PRIORITY_FEE_MARGIN_PERCENT / 100;
+    op.max_priority_fee_per_gas = wanted.max(op.max_priority_fee_per_gas).min(op.max_fee_per_gas);
+    (price.max_priority_fee_per_gas > op.max_fee_per_gas).then(|| {
+        format!(
+            "the bundler's priority fee ({} wei) is now above the proved max fee ({} wei): it \
+             may refuse the operation",
+            price.max_priority_fee_per_gas, op.max_fee_per_gas
+        )
+    })
 }
 
 /// Rate as a multiple of the gas cost, two decimals: 1.12e18 -> "1.12".
