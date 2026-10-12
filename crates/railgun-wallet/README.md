@@ -1,6 +1,6 @@
 # railgun-wallet
 
-Local Railgun wallet built on the kohaku Rust SDK (`crates/railgun`). A daemon bound to
+Local Railgun wallet built on the kohaku Rust SDK (`kohaku-railgun`, from kohaku-rs `zknox/dev`). A daemon bound to
 `127.0.0.1` owns the keys and the `RailgunProvider`; an embedded single-page front drives it.
 
 Purpose: stabilise shield, private transfer, unshield and proof of innocence end to end on the
@@ -32,7 +32,7 @@ Two derivations from a BIP-39 phrase, because they give different 0zk addresses:
 * `railgun` (default): Railgun engine scheme, same address as Railway.
 * `kohaku`: secp256k1 BIP-32 at the same paths, as kohaku's `MnemonicKeystore` does.
 
-Keys live in the daemon memory only. `<data-dir>/<chain>/<tag>/db-v2` (mode 0700, `src/db.rs`) holds synced commitments,
+Keys live in the daemon memory only. `<data-dir>/<chain>/<tag>/db-v3.redb` (directory mode 0700, `src/db.rs`) holds synced commitments,
 decrypted notes and pending POI entries (which include the nullifying key, see the upstream TODO
 in `poi/provider.rs`). `ephemeral_senders.jsonl` (mode 0600) keeps the key of any 7702 sender
 that funds transit through (native unshield), written before the UserOperation is sent.

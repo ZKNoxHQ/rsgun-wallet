@@ -12,9 +12,9 @@ cargo run --release -p railgun-viewer            # http://127.0.0.1:8790
 cargo run --release -p railgun-viewer -- --port 8791 --data-dir ~/.railgun-viewer
 ```
 
-Data layout is the wallet's (`<data-dir>/<chain>/<sha256(address)[..8]>/db-v2`), so
-`--data-dir ~/.railgun-wallet` reuses an already synced database. Do not run the wallet and the
-viewer on the same directory at the same time.
+Data layout is the wallet's (`<data-dir>/<chain>/<sha256(address)[..8]>/db-v3.redb`), so
+`--data-dir ~/.railgun-wallet` reuses an already synced database. The wallet and the viewer cannot
+open the same directory at the same time: the database file is locked by the first one.
 
 ## Keys
 
@@ -53,7 +53,7 @@ blocks, `transactions` entity and unshield fields), POI node (`ppoi_validated_tx
 
 ## Data sources
 
-* SDK (`crates/railgun`, ZKNOX fork): unspent, spent and sent notes of the account, own operations
+* SDK (`kohaku-railgun`, kohaku-rs `zknox/dev`): unspent, spent and sent notes of the account, own operations
   kept in full by the txid indexer, POI statuses per blinded commitment, pending proofs.
 * Subsquid (`chain_config.subsquid_endpoint`): block numbers, timestamps and transaction hashes of
   commitments and nullifiers, unshield events (to, amount, fee). Cached in
