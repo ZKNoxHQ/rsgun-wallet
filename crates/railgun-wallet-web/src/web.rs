@@ -1813,7 +1813,8 @@ async fn submit_legacy(
         id,
         format!("proved {} operation(s), generating pre-transaction POI", proved.proved_operations.len()),
     );
-    let pre_transaction_pois = s.railgun.pre_transaction_pois(&proved.proved_operations).await?;
+    let pre_transaction_pois =
+        railgun_broadcaster::pre_transaction_pois(&s.railgun, &proved.proved_operations).await?;
 
     if !quote.usable_at(quote_now_ms().saturating_sub(30_000)) {
         bail!("the fee quote expired while proving, run the operation again");

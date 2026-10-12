@@ -3,10 +3,9 @@
 
 use std::collections::BTreeMap;
 
-use railgun::poi::PreTransactionPois;
 use serde::{Deserialize, Serialize};
 
-use crate::crypto::EncryptedData;
+use crate::{crypto::EncryptedData, pre_transaction_poi::PreTransactionPois};
 
 /// Range of broadcaster versions this client speaks to (`BroadcasterConfig` in the reference
 /// client).

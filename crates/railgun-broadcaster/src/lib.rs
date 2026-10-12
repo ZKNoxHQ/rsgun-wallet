@@ -5,7 +5,7 @@
 //!
 //! 1. broadcasters announce signed fee rates on the fees topic ([`fees`]);
 //! 2. the wallet builds the transaction with the fee note first and `minGasPrice` bound, proves
-//!    it together with the pre-transaction POIs (`railgun` crate);
+//!    it (`railgun` crate), then the pre-transaction POIs ([`pre_transaction_poi`]);
 //! 3. the request is sealed for the chosen broadcaster and published ([`client`]);
 //! 4. the answer, a transaction hash or an error, comes back sealed with the same key.
 //!
@@ -14,6 +14,7 @@
 pub mod client;
 pub mod crypto;
 pub mod fees;
+pub mod pre_transaction_poi;
 pub mod time;
 #[cfg(any(test, feature = "testing"))]
 pub mod mock;
@@ -21,6 +22,7 @@ pub mod transport;
 pub mod wire;
 
 pub use client::{BroadcastRequest, BroadcasterClient, ClientError, SealedRequest};
+pub use pre_transaction_poi::{PreTransactionPoi, PreTransactionPois, pre_transaction_pois};
 pub use fees::{
     FeeQuote, NoQuote, PAR_RATE_WRAPPED_BASE_TOKEN, RAILWAY_TRUSTED_FEE_SIGNERS, TrustPolicy,
     token_fee,

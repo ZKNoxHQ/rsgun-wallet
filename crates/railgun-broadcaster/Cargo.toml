@@ -18,12 +18,14 @@ light-node = ["dep:waku-light"]
 aes-gcm = { workspace = true }
 async-trait = { workspace = true }
 base64 = "0.22"
+crypto = { workspace = true }
 curve25519-dalek = { workspace = true }
 ed25519-dalek = { workspace = true }
 hex = { workspace = true }
 railgun = { workspace = true }
 rand = { workspace = true }
 reqwest = { workspace = true, features = ["json"] }
+ruint = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 sha2 = { workspace = true }

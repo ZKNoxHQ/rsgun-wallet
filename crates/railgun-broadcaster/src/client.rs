@@ -7,13 +7,13 @@ use std::{
 };
 
 use rand::CryptoRng;
-use railgun::poi::PreTransactionPois;
 use thiserror::Error;
 use tracing::{debug, info, warn};
 
 use crate::{
     crypto::{self, CryptoError, EphemeralKey},
     fees::{self, FeeCache, FeeError, FeeQuote, NoQuote, TrustPolicy},
+    pre_transaction_poi::PreTransactionPois,
     transport::{TransportError, WakuTransport},
     wire::{
         self, CHAIN_TYPE_EVM, EncryptedParams, MAX_BROADCASTER_VERSION, MIN_BROADCASTER_VERSION,
