@@ -36,15 +36,29 @@ The Railgun protocol code (notes, Merkle trees, proving, POI, 4337 user operatio
 branch is upstream's `feat/kohaku-railgun` plus the fixes and features this wallet needs, which
 are being proposed upstream as separate PRs.
 
-For now the SDK is a **path dependency**: clone kohaku-rs next to this repository and check out
-`zknox/dev`.
+The SDK is a **git dependency** on [ZKNoxHQ/kohaku-rs](https://github.com/ZKNoxHQ/kohaku-rs),
+branch `zknox/dev`: Cargo fetches it, nothing to clone. `Cargo.lock` pins the commit, so
+everyone builds the same SDK. To move to the head of the branch:
 
 ```sh
-git clone git@github.com:ZKNoxHQ/kohaku-rs.git ../kohaku-rs
-git -C ../kohaku-rs checkout zknox/dev
+cargo update -p kohaku-railgun
 ```
 
-Once `zknox/dev` is published, the workspace `Cargo.toml` will switch to a git dependency.
+To work on the SDK and the wallet together, point the build at a local checkout with a
+`[patch]` that is not committed, for instance in `~/.cargo/config.toml` (absolute paths). Patch
+all six crates, so none is built twice:
+
+```toml
+[patch."https://github.com/ZKNoxHQ/kohaku-rs"]
+kohaku-crypto = { path = "/path/to/kohaku-rs/crates/crypto" }
+kohaku-eip-1193 = { path = "/path/to/kohaku-rs/crates/eip-1193" }
+kohaku-kv-store = { path = "/path/to/kohaku-rs/crates/kv-store" }
+kohaku-railgun = { path = "/path/to/kohaku-rs/crates/railgun" }
+kohaku-userop-kit = { path = "/path/to/kohaku-rs/crates/userop-kit" }
+poseidon-rust = { path = "/path/to/kohaku-rs/crates/poseidon-rust" }
+```
+
+The patch rewrites the SDK entries of `Cargo.lock`: do not commit them.
 
 ## Prerequisites
 

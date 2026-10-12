@@ -4494,6 +4494,7 @@ dependencies = [
 [[package]]
 name = "kohaku-crypto"
 version = "0.1.0"
+source = "git+https://github.com/ZKNoxHQ/kohaku-rs?branch=zknox%2Fdev#fa1375f472c3abdcfa3f66cbb75db2a0fc954a49"
 dependencies = [
  "ark-bn254",
  "ark-ff 0.6.0",
@@ -4510,6 +4511,7 @@ dependencies = [
 [[package]]
 name = "kohaku-eip-1193"
 version = "0.1.0"
+source = "git+https://github.com/ZKNoxHQ/kohaku-rs?branch=zknox%2Fdev#fa1375f472c3abdcfa3f66cbb75db2a0fc954a49"
 dependencies = [
  "alloy",
  "async-trait",
@@ -4525,6 +4527,7 @@ dependencies = [
 [[package]]
 name = "kohaku-kv-store"
 version = "0.1.0"
+source = "git+https://github.com/ZKNoxHQ/kohaku-rs?branch=zknox%2Fdev#fa1375f472c3abdcfa3f66cbb75db2a0fc954a49"
 dependencies = [
  "async-trait",
  "redb",
@@ -4535,6 +4538,7 @@ dependencies = [
 [[package]]
 name = "kohaku-railgun"
 version = "0.1.0"
+source = "git+https://github.com/ZKNoxHQ/kohaku-rs?branch=zknox%2Fdev#fa1375f472c3abdcfa3f66cbb75db2a0fc954a49"
 dependencies = [
  "aes",
  "aes-gcm",
@@ -4585,6 +4589,7 @@ dependencies = [
 [[package]]
 name = "kohaku-userop-kit"
 version = "0.1.0"
+source = "git+https://github.com/ZKNoxHQ/kohaku-rs?branch=zknox%2Fdev#fa1375f472c3abdcfa3f66cbb75db2a0fc954a49"
 dependencies = [
  "alloy",
  "alloy-sol-types",
@@ -5967,6 +5972,7 @@ dependencies = [
 [[package]]
 name = "poseidon-rust"
 version = "0.1.0"
+source = "git+https://github.com/ZKNoxHQ/kohaku-rs?branch=zknox%2Fdev#fa1375f472c3abdcfa3f66cbb75db2a0fc954a49"
 dependencies = [
  "ark-bn254",
  "ark-ff 0.6.0",

@@ -18,13 +18,13 @@ pedantic = { level = "warn", priority = -1 }
 [workspace.dependencies]
 # Kohaku SDK (ethereum/kohaku-rs), branch zknox/dev of the ZKNOX fork. The keys keep the
 # names the crates used in the kohaku monorepo, so the product code is unchanged.
-# Local checkout until zknox/dev is pushed; then switch to
-# `{ git = "https://github.com/ZKNoxHQ/kohaku-rs", branch = "zknox/dev", package = ... }`.
-crypto = { package = "kohaku-crypto", path = "../kohaku-rs/crates/crypto" }
-eip-1193-provider = { package = "kohaku-eip-1193", path = "../kohaku-rs/crates/eip-1193" }
-kohaku-kv-store = { path = "../kohaku-rs/crates/kv-store" }
-railgun = { package = "kohaku-railgun", path = "../kohaku-rs/crates/railgun" }
-userop-kit = { package = "kohaku-userop-kit", path = "../kohaku-rs/crates/userop-kit" }
+# Cargo.lock pins the commit: `cargo update -p kohaku-railgun` moves to the branch head. To build
+# against a local checkout instead, see "The Kohaku SDK" in README.md.
+crypto = { package = "kohaku-crypto", git = "https://github.com/ZKNoxHQ/kohaku-rs", branch = "zknox/dev" }
+eip-1193-provider = { package = "kohaku-eip-1193", git = "https://github.com/ZKNoxHQ/kohaku-rs", branch = "zknox/dev" }
+kohaku-kv-store = { git = "https://github.com/ZKNoxHQ/kohaku-rs", branch = "zknox/dev" }
+railgun = { package = "kohaku-railgun", git = "https://github.com/ZKNoxHQ/kohaku-rs", branch = "zknox/dev" }
+userop-kit = { package = "kohaku-userop-kit", git = "https://github.com/ZKNoxHQ/kohaku-rs", branch = "zknox/dev" }
 
 # Product crates
 kv-store-js = { path = "./crates/kv-store-js" }
