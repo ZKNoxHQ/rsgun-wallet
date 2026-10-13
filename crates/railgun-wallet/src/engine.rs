@@ -35,7 +35,7 @@ use railgun::{
     chain_config::ChainConfig,
     crypto::keys::SpendingPublicKey,
     provider::RailgunProvider,
-    transact::{RelayAction, TransactionBuilder},
+    transact::TransactionBuilder,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -50,7 +50,7 @@ use userop_kit::{
 
 use railgun_broadcaster::{
     BroadcastRequest, BroadcasterClient, ClientError, FeeQuote, NoQuote, NwakuRest, WakuTransport,
-    PAR_RATE_WRAPPED_BASE_TOKEN, fees::now_ms as quote_now_ms, token_fee,
+    PAR_RATE_WRAPPED_BASE_TOKEN, RelayAction, fees::now_ms as quote_now_ms, token_fee,
 };
 
 use crate::{
@@ -795,7 +795,7 @@ impl Engine {
                     value,
                     &memo,
                 );
-                s.submit(ctx, builder, transport, Vec::new(), None).await
+                s.submit(ctx, builder, transport, Vec::new(), None, None).await
             }
             Op::Unshield {
                 to,
@@ -955,7 +955,7 @@ impl Session {
 
         if !native {
             let builder = TransactionBuilder::new().unshield(signer, to, asset_id, value)?;
-            return self.submit(ctx, builder, transport, Vec::new(), None).await;
+            return self.submit(ctx, builder, transport, Vec::new(), None, None).await;
         }
 
         if token != self.chain.wrapped_base_token {
@@ -972,10 +972,9 @@ impl Session {
             // broadcaster the Railgun transaction must land even if a call fails, since the
             // fee is paid either way.
             action.require_success = transport == Transport::Direct;
-            let builder = TransactionBuilder::new()
-                .unshield(signer, relay_adapt, asset_id, value)?
-                .relay(action);
-            return self.submit(ctx, builder, transport, Vec::new(), None).await;
+            let builder =
+                action.bind(TransactionBuilder::new().unshield(signer, relay_adapt, asset_id, value)?);
+            return self.submit(ctx, builder, transport, Vec::new(), None, Some(action)).await;
         }
 
         // The wrapped token lands on the ephemeral 7702 sender, which unwraps it and forwards the
@@ -1000,10 +999,12 @@ impl Session {
             },
         ];
         let builder = TransactionBuilder::new().unshield(signer, sender.address(), asset_id, value)?;
-        self.submit(ctx, builder, transport, calls, Some(sender)).await
+        self.submit(ctx, builder, transport, calls, Some(sender), None).await
     }
 
-    /// Proves and submits a private transaction over the selected transport.
+    /// Proves and submits a private transaction over the selected transport. `relay` is the
+    /// RelayAdapt action `builder` was bound to, if any: the proved transaction is then sent as
+    /// `RelayAdapt.relay(...)`.
     async fn submit(
         &mut self,
         ctx: &JobCtx<'_>,
@@ -1011,16 +1012,20 @@ impl Session {
         transport: Transport,
         calls: Vec<Call>,
         sender: Option<EoaSigner>,
+        relay: Option<RelayAction>,
     ) -> Result<Value> {
+        if relay.is_some() && transport == Transport::Erc4337 {
+            bail!("RelayAdapt actions are for the legacy and direct transports");
+        }
         let result = match transport {
             Transport::Legacy => {
                 if !calls.is_empty() {
                     bail!(
                         "the legacy transport runs post-transaction calls through RelayAdapt \
-                         (TransactionBuilder::relay), not through a sender account"
+                         (RelayAction), not through a sender account"
                     );
                 }
-                self.submit_legacy(ctx, builder).await?
+                self.submit_legacy(ctx, builder, relay.as_ref()).await?
             }
             Transport::Direct => {
                 if self.eoa.is_none() {
@@ -1028,12 +1033,18 @@ impl Session {
                 }
                 // Exercises the dummy-proof path the legacy transport will use for fee quotes:
                 // same calldata shape, zero proof, estimated from the verification bypass origin.
-                match self.estimate_with_dummy_proof(builder.clone(), None).await {
+                match self
+                    .estimate_with_dummy_proof(builder.clone(), None, relay.as_ref())
+                    .await
+                {
                     Ok(gas) => ctx.step(format!("dummy-proof gas estimate: {gas}")),
                     Err(e) => ctx.step(format!("dummy-proof gas estimate failed (non fatal): {e:#}")),
                 }
                 ctx.step("building and proving (direct transport)");
-                let proved = self.railgun.build(builder, &mut rand::rng()).await?;
+                let mut proved = self.railgun.build(builder, &mut rand::rng()).await?;
+                if let Some(action) = &relay {
+                    action.package(&mut proved);
+                }
                 ctx.step(format!("proved {} operation(s)", proved.proved_operations.len()));
                 let hash = self.send_eoa(ctx, "transact", proved.tx_data).await?;
                 json!({ "transport": "direct", "txHash": hash.to_string() })
@@ -1165,7 +1176,12 @@ impl Session {
     /// Relays through a Railgun community broadcaster: quote, fee from a dummy-proof gas
     /// estimate, proof with the fee note pinned first and `minGasPrice` bound, pre-transaction
     /// POIs, sealed request over Waku.
-    async fn submit_legacy(&mut self, ctx: &JobCtx<'_>, builder: TransactionBuilder) -> Result<Value> {
+    async fn submit_legacy(
+        &mut self,
+        ctx: &JobCtx<'_>,
+        builder: TransactionBuilder,
+        relay: Option<&RelayAction>,
+    ) -> Result<Value> {
         // Real funds: never pay an uncapped rate. The reference client makes the trusted signer
         // mandatory everywhere; test networks stay usable without one.
         if self.chain.id == 1 && self.broadcaster.trusted_signer_count() == 0 {
@@ -1287,7 +1303,7 @@ impl Session {
         let mut gas = 0;
         for round in 1..=2 {
             gas = self
-                .estimate_with_dummy_proof(with_fee(fee)?, Some(gas_price))
+                .estimate_with_dummy_proof(with_fee(fee)?, Some(gas_price), relay)
                 .await
                 .with_context(|| format!("dummy-proof gas estimate (round {round})"))?;
             fee = fee_for(gas)?;
@@ -1309,7 +1325,10 @@ impl Session {
         }
 
         ctx.step("building and proving (legacy transport)");
-        let proved = self.railgun.build(with_fee(fee)?, &mut rand::rng()).await?;
+        let mut proved = self.railgun.build(with_fee(fee)?, &mut rand::rng()).await?;
+        if let Some(action) = relay {
+            action.package(&mut proved);
+        }
         ctx.step(format!(
             "proved {} operation(s), generating pre-transaction POI",
             proved.proved_operations.len()
@@ -1322,7 +1341,7 @@ impl Session {
             bail!("the fee quote expired while proving, run the operation again");
         }
 
-        let use_relay_adapt = proved.relay.is_some();
+        let use_relay_adapt = relay.is_some();
         if use_relay_adapt {
             ctx.step("submitting through RelayAdapt.relay (unwrap and recipient bound in adaptParams)");
         }
@@ -1594,8 +1613,12 @@ impl Session {
         &mut self,
         builder: TransactionBuilder,
         gas_price: Option<u128>,
+        relay: Option<&RelayAction>,
     ) -> Result<u64> {
-        let dummy = self.railgun.build_dummy(builder, &mut rand::rng()).await?;
+        let mut dummy = self.railgun.build_dummy(builder, &mut rand::rng()).await?;
+        if let Some(action) = relay {
+            action.package(&mut dummy);
+        }
         let mut request: alloy::rpc::types::TransactionRequest = dummy.tx_data.into();
         request = request.from(railgun::provider::VERIFICATION_BYPASS);
         if let Some(gas_price) = gas_price {

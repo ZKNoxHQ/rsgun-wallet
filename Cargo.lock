@@ -6346,6 +6346,7 @@ name = "railgun-broadcaster"
 version = "0.7.0"
 dependencies = [
  "aes-gcm",
+ "alloy",
  "async-trait",
  "base64 0.22.1",
  "console_error_panic_hook",
@@ -6355,6 +6356,7 @@ dependencies = [
  "hex",
  "js-sys",
  "kohaku-crypto",
+ "kohaku-eip-1193",
  "kohaku-railgun",
  "railgun-broadcaster",
  "rand 0.10.3",

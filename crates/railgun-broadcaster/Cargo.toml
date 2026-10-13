@@ -16,11 +16,13 @@ light-node = ["dep:waku-light"]
 
 [dependencies]
 aes-gcm = { workspace = true }
+alloy = { workspace = true, features = ["sol-types"] }
 async-trait = { workspace = true }
 base64 = "0.22"
 crypto = { workspace = true }
 curve25519-dalek = { workspace = true }
 ed25519-dalek = { workspace = true }
+eip-1193-provider = { workspace = true }
 hex = { workspace = true }
 railgun = { workspace = true }
 rand = { workspace = true }

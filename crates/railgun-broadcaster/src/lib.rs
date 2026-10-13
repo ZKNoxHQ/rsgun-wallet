@@ -15,6 +15,7 @@ pub mod client;
 pub mod crypto;
 pub mod fees;
 pub mod pre_transaction_poi;
+pub mod relay_adapt;
 pub mod time;
 #[cfg(any(test, feature = "testing"))]
 pub mod mock;
@@ -22,6 +23,7 @@ pub mod transport;
 pub mod wire;
 
 pub use client::{BroadcastRequest, BroadcasterClient, ClientError, SealedRequest};
+pub use relay_adapt::RelayAction;
 pub use pre_transaction_poi::{PreTransactionPoi, PreTransactionPois, pre_transaction_pois};
 pub use fees::{
     FeeQuote, NoQuote, PAR_RATE_WRAPPED_BASE_TOKEN, RAILWAY_TRUSTED_FEE_SIGNERS, TrustPolicy,
