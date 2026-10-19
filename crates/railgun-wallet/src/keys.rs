@@ -128,7 +128,8 @@ fn parse_hardened_path(path: &str) -> Result<Vec<u32>> {
         .collect()
 }
 
-/// BIP-44 path of the Ethereum account at `index`, the one MetaMask, Ledger Live and Railway use.
+/// BIP-44 path of the Ethereum account at `index` of a phrase, as MetaMask, Rabby and Railway
+/// derive it. Not Ledger Live's: see `railgun_ledger::eth::eth_path`.
 pub fn ethereum_path(index: u32) -> String {
     format!("m/44'/60'/0'/0/{index}")
 }

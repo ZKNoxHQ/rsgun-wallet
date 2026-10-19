@@ -36,9 +36,11 @@ const MAX_CHUNK: usize = 255;
 const STATUS_OK: u16 = 0x9000;
 const HARDENED: u32 = 0x8000_0000;
 
-/// The Ethereum account at `index`, as MetaMask, Ledger Live and Railway derive it.
+/// The Ethereum account at `index`, as Ledger Live (and Rabby or MetaMask on a Ledger Live
+/// account) derive it: the index is the BIP-44 account, `m/44'/60'/index'/0/0`. A phrase's
+/// accounts in MetaMask or Rabby are `m/44'/60'/0'/0/index` instead; both agree on index 0 only.
 pub fn eth_path(index: u32) -> String {
-    format!("m/44'/60'/0'/0/{index}")
+    format!("m/44'/60'/{index}'/0/0")
 }
 
 /// BIP-32 path serialization: count ‖ components (4 bytes big-endian, hardened bit set).
@@ -288,6 +290,7 @@ mod tests {
         assert!(serialize_path("44'/60'").is_err());
         assert!(serialize_path("m/x").is_err());
         assert_eq!(eth_path(0), "m/44'/60'/0'/0/0");
+        assert_eq!(eth_path(1), "m/44'/60'/1'/0/0");
     }
 
     #[tokio::test]

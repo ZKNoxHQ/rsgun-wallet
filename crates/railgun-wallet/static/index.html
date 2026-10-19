@@ -189,9 +189,9 @@ details summary { cursor: pointer; color: var(--steel); font-size: .88rem; margi
 
     <label for="f-eoa">Public account private key (optional)</label>
     <input type="password" id="f-eoa" autocomplete="off" placeholder="0x…">
-    <p class="hint">Leave empty to use the Ethereum account of the same phrase (m/44'/60'/0'/0/index, as MetaMask or Ledger Live derive it). It pays the gas for shielding. A key entered here replaces it. The accounts of the test phrase are public too: anything sent to them can be taken by anyone.</p>
+    <p class="hint">Leave empty to use the Ethereum account of the same phrase (m/44'/60'/0'/0/index, as MetaMask or Rabby derive it). It pays the gas for shielding. A key entered here replaces it. The accounts of the test phrase are public too: anything sent to them can be taken by anyone.</p>
     <label class="check"><input type="checkbox" id="f-eoa-ledger"> Public account on the Ledger (Ethereum app)</label>
-    <p class="hint">Shields are signed by the Ledger's Ethereum app (account m/44'/60'/0'/0/index), over USB. The device runs one app at a time: when you shield, the wallet asks you to open the Ethereum app, then to reopen the Railgun app. Enable <b>Blind signing</b> in the Ethereum app's settings: it cannot decode the shield call.</p>
+    <p class="hint">Shields are signed by the Ledger's Ethereum app (m/44'/60'/index'/0/0: account index + 1 in Ledger Live), over USB. The device runs one app at a time: when you shield, the wallet asks you to open the Ethereum app, then to reopen the Railgun app. Enable <b>Blind signing</b> in the Ethereum app's settings: it cannot decode the shield call.</p>
 
     <div class="row">
       <div><label for="f-bundler">Bundler URL (4337)</label><input type="text" id="f-bundler" autocomplete="off"></div>

@@ -868,8 +868,9 @@ struct LedgerEoa {
     address: Option<Address>,
 }
 
+/// Keyed by path: an address cached under an earlier derivation of the same index is not reused.
 fn ledger_eoa_key(index: u32) -> Vec<u8> {
-    format!("zknox:ledger-eth-address:{index}").into_bytes()
+    format!("zknox:ledger-eth-address:{}", railgun_ledger::eth::eth_path(index)).into_bytes()
 }
 
 /// The public account's address, when known.
