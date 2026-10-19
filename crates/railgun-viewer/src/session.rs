@@ -17,7 +17,7 @@ use railgun::{
     },
     caip::AssetId,
     chain_config::ChainConfig,
-    provider::{CommitmentKind, RailgunProvider, SentNote, UtxoNote, blinded_commitment},
+    provider::{RailgunProvider, SentNote, UtxoNote, blinded_commitment},
 };
 use serde::Deserialize;
 use serde_json::Value;
@@ -188,7 +188,7 @@ pub async fn sync_with_progress(session: &mut Session, shared: &SharedRef) -> Re
     let head = session.provider.get_block_number().await.map_err(|e| anyhow!("eth_blockNumber: {e}"))?;
     let start = session.railgun.synced_block().max(session.chain.deployment_block.saturating_sub(1));
     if head <= start {
-        return session.railgun.sync().await.map_err(|e| anyhow!("{e:#}"));
+        return session.railgun.sync_without_poi_submission().await.map_err(|e| anyhow!("{e:#}"));
     }
     let total = head - start;
     let step = (total / 25).max(20_000);
@@ -212,11 +212,11 @@ pub async fn sync_with_progress(session: &mut Session, shared: &SharedRef) -> Re
     let mut target = start;
     while target < head {
         target = (target + step).min(head);
-        session.railgun.sync_to(target).await.map_err(|e| anyhow!("{e:#}"))?;
+        session.railgun.sync_to_without_poi_submission(target).await.map_err(|e| anyhow!("{e:#}"))?;
         progress(shared, session.railgun.synced_block());
     }
     // blocks mined while syncing
-    session.railgun.sync().await.map_err(|e| anyhow!("{e:#}"))?;
+    session.railgun.sync_without_poi_submission().await.map_err(|e| anyhow!("{e:#}"))?;
     log(
         shared,
         format!("sync: {total} block(s) in {}", fmt_duration(now_ms().saturating_sub(t0))),
@@ -481,6 +481,22 @@ async fn add_chain_ops(session: &mut Session, notes: &[NoteIn], ops: &mut Vec<Op
     }
 }
 
+/// POI status of one blinded commitment on each list, as the UI shows it.
+fn poi_lists(session: &Session, blinded: U256) -> std::collections::BTreeMap<String, String> {
+    session
+        .railgun
+        .poi_status_per_list(blinded)
+        .into_iter()
+        .map(|(list, status)| {
+            let s = serde_json::to_value(status)
+                .ok()
+                .and_then(|v| v.as_str().map(str::to_owned))
+                .unwrap_or_else(|| "Unknown".into());
+            (list, s)
+        })
+        .collect()
+}
+
 pub async fn build_history(session: &mut Session) -> Result<history::History> {
     let state = session
         .railgun
@@ -510,64 +526,20 @@ pub async fn build_history(session: &mut Session) -> Result<history::History> {
         .collect();
     add_chain_ops(session, &notes, &mut ops).await;
 
-    // POI statuses: the SDK only caches statuses it fetched merkle proofs for, so every note is
-    // asked to the node here (per list), `Valid` answers being final and kept in the cache.
+    // POI statuses per list, read from the SDK's local copy of the POI lists: no request names
+    // a commitment, so every note can be looked up at every refresh.
     let mut statuses: HashMap<String, std::collections::BTreeMap<String, String>> = HashMap::new();
-    for (blinded, lists) in session.railgun.poi_statuses() {
-        let entry = statuses.entry(blinded).or_default();
-        for (list, status) in lists {
-            let s = status
-                .and_then(|st| serde_json::to_value(st).ok())
-                .and_then(|v| v.as_str().map(str::to_owned))
-                .unwrap_or_else(|| "Unknown".into());
-            entry.insert(list, s);
-        }
-    }
     if session.railgun.poi_enabled() {
-        let mut targets: Vec<(U256, CommitmentKind)> = Vec::new();
-        for n in state.notes.iter().chain(state.spent.iter()) {
-            targets.push((n.blinded_commitment, n.commitment_type.clone()));
-        }
-        for s in &state.sent {
-            targets.push((
-                blinded_commitment(s.hash, s.note_public_key, s.tree_number, s.leaf_index),
-                CommitmentKind::Transact,
-            ));
-        }
-        let mut probed = 0usize;
-        for (blinded, ctype) in targets {
-            let key = hex64(blinded);
-            let cached = session.poi_cache.get(&key);
-            let all_valid = cached
-                .map(|m| !m.is_empty() && m.values().all(|v| v == "Valid"))
-                .unwrap_or(false);
-            if all_valid {
-                statuses.insert(key, cached.cloned().unwrap_or_default());
-                continue;
-            }
-            let lists = session.railgun.probe_poi(blinded, ctype).await;
-            probed += 1;
-            let entry = statuses.entry(key.clone()).or_default();
-            for (list, status) in lists {
-                let s = status
-                    .and_then(|st| serde_json::to_value(st).ok())
-                    .and_then(|v| v.as_str().map(str::to_owned));
-                match s {
-                    Some(s) => {
-                        entry.insert(list, s);
-                    }
-                    None => {
-                        // unreachable list: keep what the cache had, else Unknown
-                        if let Some(prev) = cached.and_then(|m| m.get(&list)).cloned() {
-                            entry.insert(list, prev);
-                        }
-                    }
-                }
-            }
-            session.poi_cache.insert(key, entry.clone());
-        }
-        if probed > 0 {
-            tracing::info!("probed POI statuses of {probed} note(s)");
+        let targets = state
+            .notes
+            .iter()
+            .chain(state.spent.iter())
+            .map(|n| n.blinded_commitment)
+            .chain(state.sent.iter().map(|s| {
+                blinded_commitment(s.hash, s.note_public_key, s.tree_number, s.leaf_index)
+            }));
+        for blinded in targets {
+            statuses.insert(hex64(blinded), poi_lists(session, blinded));
         }
     }
     let pending: Vec<Value> = session
@@ -722,7 +694,7 @@ pub async fn build_history(session: &mut Session) -> Result<history::History> {
     }
 
     // Unshield POI: the community engine keys it by the railgun txid itself
-    // (`BlindedCommitment.getForUnshield(railgunTxid)`), type Unshield. No preimage needed.
+    // (`BlindedCommitment.getForUnshield(railgunTxid)`). No preimage needed.
     let mut unshield_statuses: HashMap<String, std::collections::BTreeMap<String, String>> = HashMap::new();
     if session.railgun.poi_enabled() {
         let decrypted: std::collections::HashSet<String> = notes
@@ -736,32 +708,11 @@ pub async fn build_history(session: &mut Session) -> Result<history::History> {
             let Ok(rid) = U256::from_str_radix(op.railgun_txid.trim_start_matches("0x"), 16) else {
                 continue;
             };
-            let key = format!("unshield:{}", op.railgun_txid);
-            let cached = session.poi_cache.get(&key).cloned();
-            let all_valid = cached
-                .as_ref()
-                .map(|m| !m.is_empty() && m.values().all(|v| v == "Valid"))
-                .unwrap_or(false);
-            let map = if all_valid {
-                cached.unwrap_or_default()
-            } else {
-                let mut m = cached.unwrap_or_default();
-                for (list, status) in session.railgun.probe_poi(rid, CommitmentKind::Unshield).await {
-                    if let Some(st) = status
-                        .and_then(|st| serde_json::to_value(st).ok())
-                        .and_then(|v| v.as_str().map(str::to_owned))
-                    {
-                        m.insert(list, st);
-                    }
-                }
-                session.poi_cache.insert(key, m.clone());
-                m
-            };
+            let map = poi_lists(session, rid);
             if !map.is_empty() {
                 unshield_statuses.insert(op.railgun_txid.clone(), map);
             }
         }
-        session.persist();
     }
     let recovered_valid: std::collections::HashSet<String> =
         session.railgun.poi_recovered_valid().into_iter().collect();

@@ -1,7 +1,7 @@
 //! View-only signers. They satisfy `RailgunSigner` for the read paths of the SDK (note
 //! decryption, nullifiers, addresses) and refuse to sign. `MasterSigner`'s placeholder spending
-//! public key is random and only ever reaches code that is disabled in view-only mode
-//! (`with_poi_read_only`); `SharedSigner` (legacy format) has the real one.
+//! public key is random and only ever reaches POI proof generation, which the viewer never runs
+//! (it syncs with `sync_without_poi_submission`); `SharedSigner` (legacy format) has the real one.
 
 use std::sync::Arc;
 

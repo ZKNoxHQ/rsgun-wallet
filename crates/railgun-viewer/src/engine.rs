@@ -205,7 +205,7 @@ impl Actor {
             builder = if mode == "full" {
                 builder.with_poi()
             } else {
-                builder.with_poi_read_only()
+                builder.with_poi()
             };
         }
         let mut railgun = builder.build().await.context("building railgun provider")?;
