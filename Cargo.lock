@@ -4610,7 +4610,7 @@ dependencies = [
 [[package]]
 name = "kohaku-crypto"
 version = "0.1.0"
-source = "git+https://github.com/ZKNoxHQ/kohaku-rs?branch=zknox%2Fdev-pq#8b5d62aeb22e76ce1f856f6349104b4043721262"
+source = "git+https://github.com/ZKNoxHQ/kohaku-rs?branch=zknox%2Fdev-pq#7487fada424dcb806264b014361a2a66058ecaa3"
 dependencies = [
  "ark-bn254",
  "ark-ff 0.6.0",
@@ -4627,7 +4627,7 @@ dependencies = [
 [[package]]
 name = "kohaku-eip-1193"
 version = "0.1.0"
-source = "git+https://github.com/ZKNoxHQ/kohaku-rs?branch=zknox%2Fdev-pq#8b5d62aeb22e76ce1f856f6349104b4043721262"
+source = "git+https://github.com/ZKNoxHQ/kohaku-rs?branch=zknox%2Fdev-pq#7487fada424dcb806264b014361a2a66058ecaa3"
 dependencies = [
  "alloy",
  "async-trait",
@@ -4643,7 +4643,7 @@ dependencies = [
 [[package]]
 name = "kohaku-kv-store"
 version = "0.1.0"
-source = "git+https://github.com/ZKNoxHQ/kohaku-rs?branch=zknox%2Fdev-pq#8b5d62aeb22e76ce1f856f6349104b4043721262"
+source = "git+https://github.com/ZKNoxHQ/kohaku-rs?branch=zknox%2Fdev-pq#7487fada424dcb806264b014361a2a66058ecaa3"
 dependencies = [
  "async-trait",
  "redb",
@@ -4654,7 +4654,7 @@ dependencies = [
 [[package]]
 name = "kohaku-railgun"
 version = "0.1.0"
-source = "git+https://github.com/ZKNoxHQ/kohaku-rs?branch=zknox%2Fdev-pq#8b5d62aeb22e76ce1f856f6349104b4043721262"
+source = "git+https://github.com/ZKNoxHQ/kohaku-rs?branch=zknox%2Fdev-pq#7487fada424dcb806264b014361a2a66058ecaa3"
 dependencies = [
  "aes",
  "aes-gcm",
@@ -4706,7 +4706,7 @@ dependencies = [
 [[package]]
 name = "kohaku-userop-kit"
 version = "0.1.0"
-source = "git+https://github.com/ZKNoxHQ/kohaku-rs?branch=zknox%2Fdev-pq#8b5d62aeb22e76ce1f856f6349104b4043721262"
+source = "git+https://github.com/ZKNoxHQ/kohaku-rs?branch=zknox%2Fdev-pq#7487fada424dcb806264b014361a2a66058ecaa3"
 dependencies = [
  "alloy",
  "alloy-sol-types",
@@ -6160,7 +6160,7 @@ dependencies = [
 [[package]]
 name = "poseidon-rust"
 version = "0.1.0"
-source = "git+https://github.com/ZKNoxHQ/kohaku-rs?branch=zknox%2Fdev-pq#8b5d62aeb22e76ce1f856f6349104b4043721262"
+source = "git+https://github.com/ZKNoxHQ/kohaku-rs?branch=zknox%2Fdev-pq#7487fada424dcb806264b014361a2a66058ecaa3"
 dependencies = [
  "ark-bn254",
  "ark-ff 0.6.0",
