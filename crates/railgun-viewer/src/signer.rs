@@ -10,7 +10,10 @@ use railgun::{
         chain::ChainId,
         signer::{RailgunSigner, RailgunSignerError},
     },
-    crypto::keys::{MasterPublicKey, SpendingKey, SpendingPublicKey, SpendingSignature, ViewingKey},
+    crypto::{
+        kem::KemKeyPair,
+        keys::{MasterPublicKey, SpendingKey, SpendingPublicKey, SpendingSignature, ViewingKey},
+    },
 };
 use alloy::primitives::U256;
 
@@ -20,6 +23,8 @@ pub struct MasterSigner {
     viewing: ViewingKey,
     master: MasterPublicKey,
     placeholder: SpendingKey,
+    /// Derived from the viewing key, as the wallet does: post-quantum notes are readable too.
+    kem: KemKeyPair,
     chain: ChainId,
 }
 
@@ -29,6 +34,7 @@ impl MasterSigner {
             viewing,
             master,
             placeholder: rand::random(),
+            kem: viewing.kem_key_pair(),
             chain: ChainId::evm(chain_id),
         })
     }
@@ -52,6 +58,9 @@ impl RailgunSigner for MasterSigner {
     fn master_public_key(&self) -> MasterPublicKey {
         self.master
     }
+    fn kem_key_pair(&self) -> Option<&KemKeyPair> {
+        Some(&self.kem)
+    }
     async fn sign(&self, _inputs: U256) -> Result<SpendingSignature, RailgunSignerError> {
         Err(RailgunSignerError::new("view-only signer: no spending key"))
     }
@@ -62,12 +71,18 @@ impl RailgunSigner for MasterSigner {
 pub struct SharedSigner {
     viewing: ViewingKey,
     spub: SpendingPublicKey,
+    kem: KemKeyPair,
     chain: ChainId,
 }
 
 impl SharedSigner {
     pub fn new(viewing: ViewingKey, spub: SpendingPublicKey, chain_id: u64) -> Arc<Self> {
-        Arc::new(Self { viewing, spub, chain: ChainId::evm(chain_id) })
+        Arc::new(Self {
+            viewing,
+            spub,
+            kem: viewing.kem_key_pair(),
+            chain: ChainId::evm(chain_id),
+        })
     }
 }
 
@@ -82,6 +97,9 @@ impl RailgunSigner for SharedSigner {
     }
     fn spending_public_key(&self) -> SpendingPublicKey {
         self.spub
+    }
+    fn kem_key_pair(&self) -> Option<&KemKeyPair> {
+        Some(&self.kem)
     }
     async fn sign(&self, _inputs: U256) -> Result<SpendingSignature, RailgunSignerError> {
         Err(RailgunSignerError::new("view-only signer: no spending key"))

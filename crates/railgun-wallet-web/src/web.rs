@@ -28,7 +28,7 @@ use kohaku_kv_store::Store;
 use kv_store_js::JsKvStore;
 use railgun::{
     account::{
-        address::RailgunAddress,
+        address::{PqRailgunAddress, RailgunAddress},
         chain::ChainId as RgChainId,
         signer::{PrivateKeySigner as RgSigner, RailgunSigner},
     },
@@ -36,7 +36,7 @@ use railgun::{
     caip::AssetId,
     chain_config::ChainConfig,
     provider::{RailgunProvider, RailgunProviderError},
-    transact::TransactionBuilder,
+    transact::{NoteEncryption, TransactionBuilder},
 };
 use railgun_broadcaster::{
     BroadcastRequest, BroadcasterClient, ClientError, FeeQuote, NoQuote, NwakuRest, WakuTransport,
@@ -136,6 +136,8 @@ struct FeeLimits {
     #[serde(default)]
     single_proof: bool,
     gas_margin_percent: Option<u32>,
+    #[serde(default)]
+    hybrid_change: bool,
     broadcaster: Option<String>,
     #[serde(default)]
     single_proof_strict: bool,
@@ -444,7 +446,7 @@ impl Actor {
                     ),
                 };
             (
-                RgSigner::new(rgkeys.spending, rgkeys.viewing, RgChainId::All),
+                RgSigner::new_with_kem(rgkeys.spending, rgkeys.viewing, rgkeys.kem, RgChainId::All),
                 derivation,
             )
         };
@@ -628,15 +630,18 @@ impl Actor {
             }
             Op::Shield { asset, amount } => shield(s, &shared, id, &asset, &amount).await,
             Op::Transfer { to, asset, amount, memo, transport, fee_limits } => {
-                let to = RailgunAddress::from_str(to.trim())
-                    .map_err(|e| anyhow!("invalid 0zk recipient: {e}"))?;
+                let (to, encryption) = parse_recipient(&to)?;
+                if encryption != NoteEncryption::Legacy {
+                    push_step(&shared, id, "note to the recipient encrypted with ML-KEM-768 + ECDH (post-quantum)".into());
+                }
                 let (asset, value, _) = resolve_amount(s, &asset, &amount).await?;
-                let builder = TransactionBuilder::new().transfer(
+                let builder = TransactionBuilder::new().transfer_with_encryption(
                     s.signer.clone() as Arc<dyn RailgunSigner>,
                     to,
                     asset,
                     value,
                     &memo,
+                    encryption,
                 );
                 submit(s, &shared, id, builder, transport, Vec::new(), None, None, &fee_limits).await
             }
@@ -761,6 +766,13 @@ impl Actor {
             unlocked: true,
             chain_id: Some(session.chain.id),
             address: Some(address.to_string()),
+            pq_address: session.signer.kem_key_pair().map(|kem| {
+                session
+                    .signer
+                    .address()
+                    .with_kem_key(kem.encapsulation_key().clone())
+                    .to_string()
+            }),
             derivation: Some(session.derivation.to_string()),
             eoa: eoa.map(|a| a.to_string()),
             eoa_source: session.eoa_source.clone(),
@@ -1427,6 +1439,12 @@ async fn submit(
     if relay.is_some() && transport == Transport::Erc4337 {
         bail!("RelayAdapt actions are for the legacy and direct transports");
     }
+    let builder = if fee_limits.hybrid_change {
+        push_step(shared, id, "change notes encrypted with ML-KEM-768 + ECDH, to this wallet's key".into());
+        builder.with_hybrid_change()
+    } else {
+        builder
+    };
     let result = match transport {
         Transport::Legacy => {
             if !calls.is_empty() {
@@ -2242,4 +2260,17 @@ pub async fn api(method: String, path: String, body: String) -> Result<String, J
         .await
         .map(|v| v.to_string())
         .map_err(|e| JsValue::from_str(&e))
+}
+
+/// A version 2 address (with the ML-KEM key) selects the post-quantum scheme for the note, a
+/// version 1 address the legacy one.
+fn parse_recipient(to: &str) -> Result<(RailgunAddress, NoteEncryption)> {
+    let to = to.trim();
+    match to.parse::<PqRailgunAddress>() {
+        Ok(pq) => Ok((pq.address(), pq.encryption())),
+        Err(pq_err) => match RailgunAddress::from_str(to) {
+            Ok(address) => Ok((address, NoteEncryption::Legacy)),
+            Err(e) => bail!("invalid 0zk recipient: {e} (as a version 2 address: {pq_err})"),
+        },
+    }
 }

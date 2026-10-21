@@ -14,7 +14,10 @@ use anyhow::{Context, Result, anyhow};
 use hmac::{Hmac, Mac};
 use railgun::{
     account::signer::{spending_key_path, viewing_key_path},
-    crypto::keys::{HexKey, SpendingKey, ViewingKey},
+    crypto::{
+        kem::KemKeyPair,
+        keys::{HexKey, SpendingKey, ViewingKey},
+    },
 };
 use serde::{Deserialize, Serialize};
 use sha2::Sha512;
@@ -35,6 +38,10 @@ pub enum Derivation {
 pub struct RailgunKeys {
     pub spending: SpendingKey,
     pub viewing: ViewingKey,
+    /// Receives post-quantum encrypted notes. Derived from the viewing key: same trust class (a
+    /// viewing key reads every note of the account anyway), and it exists for raw keys and
+    /// Ledger accounts, not only for mnemonics.
+    pub kem: KemKeyPair,
 }
 
 /// Derives the Railgun spending and viewing keys at `index` from a BIP-39 mnemonic.
@@ -75,6 +82,9 @@ fn keys_from_bytes(spending: [u8; 32], viewing: [u8; 32]) -> Result<RailgunKeys>
             .map_err(|e| anyhow!("spending key: {e}"))?,
         viewing: ViewingKey::from_hex(&hex::encode(viewing))
             .map_err(|e| anyhow!("viewing key: {e}"))?,
+        kem: ViewingKey::from_hex(&hex::encode(viewing))
+            .map_err(|e| anyhow!("viewing key: {e}"))?
+            .kem_key_pair(),
     })
 }
 

@@ -239,6 +239,10 @@ details summary { cursor: pointer; color: var(--steel); font-size: .88rem; margi
         <h2>Shielded address</h2>
         <div class="addr" id="zk-addr"></div>
         <div class="actions" style="margin-top:.4rem"><button class="quiet" id="btn-copy">Copy</button></div>
+        <h2 style="margin-top:.8rem">Post-quantum address</h2>
+        <p class="hint">Version 2: the same keys plus this wallet's ML-KEM-768 key. Notes sent to it are encrypted with ML-KEM + ECDH; only wallets holding the key read them.</p>
+        <div class="addr" id="pq-addr" style="max-height:6em;overflow:auto"></div>
+        <div class="actions" style="margin-top:.4rem"><button class="quiet" id="btn-copy-pq">Copy</button></div>
       </div>
     </div>
 
@@ -262,6 +266,7 @@ details summary { cursor: pointer; color: var(--steel); font-size: .88rem; margi
           <div class="tabs" id="transport-tabs" role="tablist"></div>
           <p class="hint" id="transport-note"></p>
           <div class="diag" id="transport-diag" hidden></div>
+          <label class="check"><input type="checkbox" id="pq-change"> Post-quantum change notes (encrypted to this wallet's ML-KEM key; wallets without the key will not see them)</label>
           <div id="aa-options" hidden>
             <label class="check"><input type="checkbox" id="aa-single"> Prove once (one signature per operation, for hardware and threshold signers)</label>
             <div class="row" id="aa-margin-row" hidden>
@@ -301,7 +306,7 @@ details summary { cursor: pointer; color: var(--steel); font-size: .88rem; margi
           </div>
 
           <div id="form-transfer" hidden>
-            <label for="t-to">Recipient 0zk address</label>
+            <label for="t-to">Recipient 0zk address (version 1, or version 2 for a post-quantum encrypted note)</label>
             <textarea id="t-to" spellcheck="false"></textarea>
             <div class="row">
               <div><label for="t-asset">Token</label><input type="text" id="t-asset" value="native" autocomplete="off"></div>
@@ -507,6 +512,7 @@ function feeLimits() {
     maxFeeRate: $("l-rate").value.trim() || null, maxFee: $("l-maxfee").value.trim() || null,
     singleProof: $("aa-single").checked, gasMarginPercent: Number($("aa-margin").value) || null,
     singleProofStrict: $("aa-strict").checked,
+    hybridChange: $("pq-change").checked,
     broadcaster: state.broadcaster,
   };
 }
@@ -630,6 +636,7 @@ function render() {
   const chain = { 1: "mainnet", 11155111: "Sepolia" }[s.chainId] || `chain ${s.chainId}`;
   $("hdr-meta").textContent = `${chain}, synced to block ${s.syncedBlock ?? "?"}, keys: ${s.derivation}` + (busy ? `, running ${state.activeJob.kind}` : "");
   $("zk-addr").textContent = s.address;
+  $("pq-addr").textContent = s.pqAddress || "none";
   $("eoa-addr").textContent = s.eoa || (s.eoaLedger ? "on the Ledger (Ethereum app): read at the first shield" : "none (shielding disabled)");
   $("eoa-bal").textContent = [s.eoaBalance != null ? `${s.eoaBalance} native` : null, s.eoaSource].filter(Boolean).join(", ");
   $("btn-shield").disabled = busy || !(s.eoa || s.eoaLedger);
@@ -745,6 +752,7 @@ $("btn-cache").addEventListener("click", async () => {
 });
 $("btn-sync").addEventListener("click", () => submitOp({ op: "sync" }));
 $("btn-copy").addEventListener("click", () => navigator.clipboard?.writeText($("zk-addr").textContent));
+$("btn-copy-pq").addEventListener("click", () => navigator.clipboard?.writeText($("pq-addr").textContent));
 
 $("btn-shield").addEventListener("click", () => submitOp({ op: "shield", asset: $("s-asset").value, amount: $("s-amount").value }));
 $("btn-transfer").addEventListener("click", () => submitOp({ op: "transfer", to: $("t-to").value, asset: $("t-asset").value, amount: $("t-amount").value, memo: $("t-memo").value, transport: state.transport, ...feeLimits() }));
@@ -758,6 +766,8 @@ document.querySelectorAll("#action-tabs button").forEach((btn) => btn.addEventLi
 }));
 
 try { $("aa-single").checked = localStorage.getItem("rgw:aa-single") === "1"; } catch {}
+try { $("pq-change").checked = localStorage.getItem("rgw:pq-change") === "1"; } catch {}
+$("pq-change").addEventListener("change", () => { try { localStorage.setItem("rgw:pq-change", $("pq-change").checked ? "1" : "0"); } catch {} });
 try { $("aa-strict").checked = localStorage.getItem("rgw:aa-strict") === "1"; } catch {}
 $("aa-strict").addEventListener("change", () => { try { localStorage.setItem("rgw:aa-strict", $("aa-strict").checked ? "1" : "0"); } catch {} });
 $("aa-single").addEventListener("change", () => { try { localStorage.setItem("rgw:aa-single", $("aa-single").checked ? "1" : "0"); } catch {} render(); });

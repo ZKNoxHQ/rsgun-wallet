@@ -8,7 +8,10 @@ use railgun::{
         chain::ChainId,
         signer::{RailgunSigner, RailgunSignerError},
     },
-    crypto::keys::{SpendingPublicKey, SpendingSignature, ViewingKey},
+    crypto::{
+        kem::KemKeyPair,
+        keys::{SpendingPublicKey, SpendingSignature, ViewingKey},
+    },
 };
 use ruint::aliases::U256;
 use thiserror::Error;
@@ -41,6 +44,9 @@ pub struct LedgerSigner<E> {
     chain_id: ChainId,
     spending_pubkey: SpendingPublicKey,
     viewing_key: ViewingKey,
+    /// From the exported viewing key, as every signer of the wallet: post-quantum notes are
+    /// read on the host, the device only signs.
+    kem_key_pair: KemKeyPair,
 }
 
 impl<E: Exchange> LedgerSigner<E> {
@@ -93,6 +99,7 @@ impl<E: Exchange> LedgerSigner<E> {
             account_index,
             chain_id,
             spending_pubkey,
+            kem_key_pair: viewing_key.kem_key_pair(),
             viewing_key,
         }))
     }
@@ -130,6 +137,10 @@ impl<E: Exchange> RailgunSigner for LedgerSigner<E> {
 
     fn spending_public_key(&self) -> SpendingPublicKey {
         self.spending_pubkey
+    }
+
+    fn kem_key_pair(&self) -> Option<&KemKeyPair> {
+        Some(&self.kem_key_pair)
     }
 
     async fn sign(&self, inputs: U256) -> Result<SpendingSignature, RailgunSignerError> {

@@ -46,6 +46,8 @@ pub struct StatusSnapshot {
     pub unlocked: bool,
     pub chain_id: Option<u64>,
     pub address: Option<String>,
+    /// The address with the account's ML-KEM key (version 2), for post-quantum encrypted notes.
+    pub pq_address: Option<String>,
     pub derivation: Option<String>,
     pub eoa: Option<String>,
     /// Where the public account comes from: a derivation path, or "imported key".

@@ -26,7 +26,7 @@ use anyhow::{Context, Result, anyhow, bail};
 use eip_1193_provider::tx_data::TxData;
 use railgun::{
     account::{
-        address::RailgunAddress,
+        address::{PqRailgunAddress, RailgunAddress},
         chain::ChainId as RgChainId,
         signer::{PrivateKeySigner as RgSigner, RailgunSigner},
     },
@@ -35,7 +35,7 @@ use railgun::{
     chain_config::ChainConfig,
     crypto::keys::SpendingPublicKey,
     provider::RailgunProvider,
-    transact::TransactionBuilder,
+    transact::{NoteEncryption, TransactionBuilder},
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -320,6 +320,10 @@ pub struct FeeLimits {
     pub single_proof: bool,
     /// Margin added to the limits in single-proof mode, percent. Defaults to 12.
     pub gas_margin_percent: Option<u32>,
+    /// Encrypt the change notes with the post-quantum scheme, to this wallet's own ML-KEM key.
+    /// Wallets without that key (legacy ones on the same seed) will not see the change.
+    #[serde(default)]
+    pub hybrid_change: bool,
     /// Legacy: 0zk address of the broadcaster to use, instead of a draw among the cheapest.
     pub broadcaster: Option<String>,
     /// With `single_proof`: fail rather than fall back to the iterative path when the limits
@@ -591,7 +595,12 @@ impl Engine {
                         "provide a mnemonic, both spending and viewing keys, or a Ledger device"
                     ),
                 };
-                let signer = RgSigner::new(keys.spending, keys.viewing, RgChainId::All);
+                let signer = RgSigner::new_with_kem(
+                    keys.spending,
+                    keys.viewing,
+                    keys.kem.clone(),
+                    RgChainId::All,
+                );
                 (signer, Some(keys), derivation)
             };
         let address = signer.address().to_string();
@@ -785,15 +794,18 @@ impl Engine {
                 fee_limits,
             } => {
                 s.fee_limits = fee_limits;
-                let to = RailgunAddress::from_str(to.trim())
-                    .map_err(|e| anyhow!("invalid 0zk recipient: {e}"))?;
+                let (to, encryption) = parse_recipient(&to)?;
+                if encryption != NoteEncryption::Legacy {
+                    ctx.step("note to the recipient encrypted with ML-KEM-768 + ECDH (post-quantum)");
+                }
                 let (asset, value, _) = s.resolve_amount(&asset, &amount).await?;
-                let builder = TransactionBuilder::new().transfer(
+                let builder = TransactionBuilder::new().transfer_with_encryption(
                     s.signer.clone() as Arc<dyn RailgunSigner>,
                     to,
                     asset,
                     value,
                     &memo,
+                    encryption,
                 );
                 s.submit(ctx, builder, transport, Vec::new(), None, None).await
             }
@@ -1017,6 +1029,12 @@ impl Session {
         if relay.is_some() && transport == Transport::Erc4337 {
             bail!("RelayAdapt actions are for the legacy and direct transports");
         }
+        let builder = if self.fee_limits.hybrid_change {
+            ctx.step("change notes encrypted with ML-KEM-768 + ECDH, to this wallet's key");
+            builder.with_hybrid_change()
+        } else {
+            builder
+        };
         let result = match transport {
             Transport::Legacy => {
                 if !calls.is_empty() {
@@ -1759,6 +1777,12 @@ impl Session {
             unlocked: true,
             chain_id: Some(self.chain.id),
             address: Some(address.to_string()),
+            pq_address: self.signer.kem_key_pair().map(|kem| {
+                self.signer
+                    .address()
+                    .with_kem_key(kem.encapsulation_key().clone())
+                    .to_string()
+            }),
             derivation: Some(self.derivation.to_string()),
             eoa: eoa.map(|a| a.to_string()),
             eoa_source: self.eoa_source.clone(),
@@ -1849,4 +1873,17 @@ fn record_ephemeral_sender(data_dir: &Path, sender: &EoaSigner) -> Result<()> {
     writeln!(file, "{line}")?;
     file.sync_all()?;
     Ok(())
+}
+
+/// A version 2 address (with the ML-KEM key) selects the post-quantum scheme for the note, a
+/// version 1 address the legacy one.
+fn parse_recipient(to: &str) -> Result<(RailgunAddress, NoteEncryption)> {
+    let to = to.trim();
+    match to.parse::<PqRailgunAddress>() {
+        Ok(pq) => Ok((pq.address(), pq.encryption())),
+        Err(pq_err) => match RailgunAddress::from_str(to) {
+            Ok(address) => Ok((address, NoteEncryption::Legacy)),
+            Err(e) => bail!("invalid 0zk recipient: {e} (as a version 2 address: {pq_err})"),
+        },
+    }
 }
