@@ -266,7 +266,7 @@ details summary { cursor: pointer; color: var(--steel); font-size: .88rem; margi
           <div class="tabs" id="transport-tabs" role="tablist"></div>
           <p class="hint" id="transport-note"></p>
           <div class="diag" id="transport-diag" hidden></div>
-          <label class="check"><input type="checkbox" id="pq-change"> Post-quantum change notes (encrypted to this wallet's ML-KEM key; wallets without the key will not see them)</label>
+          <label class="check"><input type="checkbox" id="pq-change"> Post-quantum change notes also for legacy transfers (a transfer to a version 2 address always gets them; wallets without this wallet's ML-KEM key will not see them)</label>
           <div id="aa-options" hidden>
             <label class="check"><input type="checkbox" id="aa-single"> Prove once (one signature per operation, for hardware and threshold signers)</label>
             <div class="row" id="aa-margin-row" hidden>
