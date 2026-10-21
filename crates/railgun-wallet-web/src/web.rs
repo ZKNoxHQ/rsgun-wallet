@@ -303,8 +303,67 @@ pub fn start() {
     TX.with(|t| *t.borrow_mut() = Some(tx));
     spawn_local(async move {
         let mut actor = Actor { shared: shared_ref(), session: None };
-        while let Some(cmd) = rx.next().await {
-            actor.handle(cmd).await;
+        // Commands that arrived while a sync ran, in order.
+        let mut queued = std::collections::VecDeque::new();
+        loop {
+            let cmd = match queued.pop_front() {
+                Some(cmd) => cmd,
+                None => match rx.next().await {
+                    Some(cmd) => cmd,
+                    None => break,
+                },
+            };
+            let Command::Job { id, op: Op::Sync } = cmd else {
+                actor.handle(cmd).await;
+                continue;
+            };
+            // A sync can run for long (the first copy of a POI list): a lock stops it, as a
+            // reload would. The SDK saves in atomic steps, so the next unlock resumes from the
+            // last one. Transactions are never interrupted: a lock waits for them.
+            let mut lock = None;
+            {
+                let job = futures::FutureExt::fuse(actor.handle(Command::Job { id, op: Op::Sync }));
+                futures::pin_mut!(job);
+                loop {
+                    futures::select! {
+                        () = job => break,
+                        next = rx.next() => match next {
+                            Some(Command::Lock(reply)) => {
+                                lock = Some(reply);
+                                break;
+                            }
+                            Some(other) => queued.push_back(other),
+                            None => {
+                                job.await;
+                                break;
+                            }
+                        },
+                    }
+                }
+            }
+            if let Some(reply) = lock {
+                // Operations queued behind the sync belonged to the session that is closing.
+                let dropped: Vec<u64> = queued
+                    .iter()
+                    .filter_map(|cmd| match cmd {
+                        Command::Job { id, .. } => Some(*id),
+                        _ => None,
+                    })
+                    .collect();
+                queued.retain(|cmd| !matches!(cmd, Command::Job { .. }));
+                if let Ok(mut jobs) = actor.shared.jobs.lock() {
+                    for (job_id, error) in std::iter::once((id, "stopped: the wallet was locked"))
+                        .chain(dropped.into_iter().map(|d| (d, "not run: the wallet was locked")))
+                    {
+                        jobs.update(job_id, |job| {
+                            job.finished_at = Some(now_ms());
+                            job.state = JobState::Failed;
+                            job.error = Some(error.into());
+                        });
+                    }
+                }
+                actor.handle(Command::Lock(reply)).await;
+            }
         }
     });
 }
