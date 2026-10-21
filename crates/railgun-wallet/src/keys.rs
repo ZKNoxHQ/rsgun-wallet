@@ -167,6 +167,30 @@ mod tests {
         );
     }
 
+    /// Accounts above 0, from `@railgun-community/engine` (`deriveNodes` then `encodeAddress`,
+    /// chain-agnostic) on the hardhat mnemonic.
+    #[test]
+    fn railgun_scheme_matches_engine_for_later_accounts() {
+        let address = |index| {
+            let keys = derive(TEST_MNEMONIC, index, Derivation::Railgun).unwrap();
+            PrivateKeySigner::new(keys.spending, keys.viewing, ChainId::All)
+                .address()
+                .to_string()
+        };
+        assert_eq!(
+            address(1),
+            "0zk1qy3v85v8p20nhh0ngjfzvtu6rn3gqyelkf637dr24vedl9c5n0xerrv7j6fe3z53lazlyh76vzhsd95mvzdeggp7jza7k4xvklx20sgxpp3dct6lww27572l9cd"
+        );
+        assert_eq!(
+            address(2),
+            "0zk1qykd7kxmknsa4twdfjry47u4vt8ajfv9dsy2ehqgt7a48mqkewtfhrv7j6fe3z53lu2xzw98f9pkyrcz9cfxya9xgjgnq6wcux50q5ha5v732x5xk3ku50stj3c"
+        );
+        assert_eq!(
+            address(3),
+            "0zk1qydxcqzgtapkzw7ennwuz30cmat3frvccymahqe379v3zr0yl5ddrrv7j6fe3z53luyla4cxkg3d9er5csdj8xnj6faxc3aey2ee0lxhpdu3er2a63vlqz6szxh"
+        );
+    }
+
     /// The hardhat / anvil phrase: account 0 and 1 are known to every Ethereum developer.
     #[test]
     fn ethereum_account_matches_the_standard_derivation() {
