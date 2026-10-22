@@ -119,7 +119,7 @@ pre.log {
 }
 .banner { border-left: 4px solid var(--fail); background: var(--panel); padding: .6rem .9rem; margin-bottom: 1rem; font-size: .9rem; }
 details summary { cursor: pointer; color: var(--steel); font-size: .88rem; margin-top: .6rem; }
-/* Demo mode (?demo in the URL): blocks marked "dev" are hidden. Without it they show as usual. */
+/* Demo mode (?demo in the URL, or Shift+D): blocks marked "dev" are hidden. Without it they show as usual. */
 html.demo .dev { display: none !important; }
 /* The post-quantum address in full, without its scroll box. */
 html.demo #pq-addr { max-height: none !important; overflow: visible !important; }
@@ -338,7 +338,7 @@ if (new URLSearchParams(location.search).has("demo")) document.documentElement.c
           </div>
         </section>
 
-        <section>
+        <section class="dev">
           <h2>Operations</h2>
           <div id="jobs"></div>
         </section>
@@ -741,6 +741,16 @@ $("btn-unlock").addEventListener("click", async () => {
   poll();
 });
 
+// Shift+D outside a text field switches between demo and dev mode, without a reload (the wallet
+// stays open). The URL follows, so a reload keeps the mode.
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "D" || !e.shiftKey || e.ctrlKey || e.altKey || e.metaKey) return;
+  if (e.target.closest?.("input, textarea, select, [contenteditable]")) return;
+  const demo = document.documentElement.classList.toggle("demo");
+  const url = new URL(location.href);
+  if (demo) url.searchParams.set("demo", ""); else url.searchParams.delete("demo");
+  history.replaceState(null, "", url);
+});
 $("btn-lock").addEventListener("click", async () => {
   // A running transaction finishes first: say so rather than look idle.
   const btn = $("btn-lock");
