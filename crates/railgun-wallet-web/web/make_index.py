@@ -27,7 +27,8 @@ html = html[:i] + '\n<script src="./shim.js"></script>' + html[i:]
 must('"/waku-bundle.js"', '"./waku-bundle.js"')
 
 # where the engine runs, at the bottom of the page
-note = ('<div style="margin:18px auto 12px;max-width:1280px;text-align:center;font-size:12px;opacity:.65">'
+# hidden in demo mode, like the other blocks marked "dev"
+note = ('<div class="dev" style="margin:18px auto 12px;max-width:1280px;text-align:center;font-size:12px;opacity:.65">'
         'Runs entirely in this browser: keys stay in the page, the wallet database is kept in '
         'IndexedDB, only the RPC, the subsquid, the POI node, the bundler and the Waku network are '
         'contacted.</div>\n')
