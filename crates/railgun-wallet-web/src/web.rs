@@ -203,6 +203,9 @@ struct Session {
     eoa: Option<EoaSigner>,
     /// Set when the public account is the Ledger's Ethereum app (then `eoa` is `None`).
     eoa_ledger: Option<LedgerEoa>,
+    /// The spending signer is the Ledger over USB: private operations first bring its Railgun
+    /// app to the front.
+    ledger_usb: bool,
     /// The wallet's IndexedDB database, also holding the Ledger Ethereum address once read.
     db: Store,
     eoa_source: Option<String>,
@@ -458,15 +461,21 @@ impl Actor {
             }
         }
 
+        let ledger_usb = p.ledger && p.ledger_transport.as_deref().unwrap_or("usb") == "usb";
         // Chain-agnostic address (RgChainId::All), as Railway displays it.
         let (signer, derivation): (Arc<dyn RailgunSigner>, &'static str) = if p.ledger {
             match p.ledger_transport.as_deref().unwrap_or("usb") {
                 "usb" => {
                     // The page granted USB access during the unlock click (shim.js); in this
-                    // worker getDevices() then hands the device over without a picker.
-                    let device = railgun_ledger::transport::webusb::WebUsbLedger::connect_existing()
-                        .await
-                        .map_err(|e| anyhow!("Ledger: {e} (plugged in, unlocked, app open?)"))?;
+                    // worker getDevices() then hands the device over without a picker. The
+                    // Railgun app is opened first when the device shows another one.
+                    let device = switch_app(
+                        &|msg| tracing::info!("{msg}"),
+                        railgun_ledger::eth::RAILGUN_APP_NAME,
+                        APP_SWITCH_WAIT_MS,
+                    )
+                    .await
+                    .map_err(|e| anyhow!("Ledger: {e:#} (plugged in and unlocked?)"))?;
                     let signer =
                         railgun_ledger::LedgerSigner::connect(device, RgChainId::All, p.index)
                             .await
@@ -658,6 +667,7 @@ impl Actor {
             eoa,
             eoa_source,
             eoa_ledger,
+            ledger_usb,
             db,
             signer,
             railgun,
@@ -976,8 +986,7 @@ const APP_SWITCH_WAIT_MS: u64 = 180_000;
 /// device does not take these commands, or the user declines, it falls back to asking for a
 /// manual switch and waits for it.
 async fn switch_app(
-    shared: &SharedRef,
-    id: u64,
+    step: &dyn Fn(String),
     want: &str,
     wait_ms: u64,
 ) -> Result<railgun_ledger::transport::webusb::WebUsbLedger> {
@@ -989,41 +998,33 @@ async fn switch_app(
         if let Ok(device) = WebUsbLedger::connect_existing().await {
             match eth::current_app(&device).await {
                 Ok((name, version)) if name == want => {
-                    push_step(shared, id, format!("Ledger: {want} app {version} open"));
+                    step(format!("Ledger: {want} app {version} open"));
                     return Ok(device);
                 }
                 Ok((name, _)) if name == eth::DASHBOARD_NAME && !open_sent => {
                     open_sent = true;
-                    push_step(
-                        shared,
-                        id,
-                        format!("Ledger: opening the {want} app (confirm on the device if asked)"),
-                    );
+                    step(format!(
+                        "Ledger: opening the {want} app (confirm on the device if asked)"
+                    ));
                     match eth::open_app(&device, want).await {
                         Ok(()) => {}
                         Err(ProtocolError::Status {
                             status: eth::STATUS_APP_NOT_INSTALLED,
                         }) => bail!("the {want} app is not installed on this Ledger"),
-                        Err(e) => push_step(
-                            shared,
-                            id,
-                            format!("Ledger did not open {want} ({e}): open it on the device"),
-                        ),
+                        Err(e) => step(format!(
+                            "Ledger did not open {want} ({e}): open it on the device"
+                        )),
                     }
                 }
                 Ok((name, _)) if name != eth::DASHBOARD_NAME && !quit_sent => {
                     quit_sent = true;
-                    push_step(shared, id, format!("Ledger: closing the {name} app"));
+                    step(format!("Ledger: closing the {name} app"));
                     let _ = eth::quit_app(&device).await;
                 }
                 Ok((name, _)) => {
                     if (open_sent || quit_sent) && !asked && name != last_seen {
                         asked = true;
-                        push_step(
-                            shared,
-                            id,
-                            format!("Ledger shows {name:?}: open the {want} app on the device"),
-                        );
+                        step(format!("Ledger shows {name:?}: open the {want} app on the device"));
                     }
                     last_seen = name;
                 }
@@ -1047,7 +1048,8 @@ async fn open_eth_app(
         "Ledger: switching to the Ethereum app (Blind signing must be enabled in its settings)"
             .into(),
     );
-    switch_app(shared, id, railgun_ledger::eth::ETHEREUM_APP_NAME, APP_SWITCH_WAIT_MS).await
+    let step = |msg| push_step(shared, id, msg);
+    switch_app(&step, railgun_ledger::eth::ETHEREUM_APP_NAME, APP_SWITCH_WAIT_MS).await
 }
 
 /// After public transactions signed on the Ethereum app: back to the Railgun app, best effort
@@ -1057,7 +1059,8 @@ async fn back_to_railgun_app(shared: &SharedRef, id: u64, signing: &EoaSigning) 
         return;
     }
     let name = railgun_ledger::eth::RAILGUN_APP_NAME;
-    if switch_app(shared, id, name, 60_000).await.is_err() {
+    let step = |msg| push_step(shared, id, msg);
+    if switch_app(&step, name, 60_000).await.is_err() {
         push_step(
             shared,
             id,
@@ -1504,6 +1507,12 @@ async fn submit(
     } else {
         builder
     };
+    if s.ledger_usb {
+        // The spending signature comes from the Railgun app: bring it to the front if another
+        // app is open (the Ethereum app after a shield). The signer reconnects on its own.
+        let step = |msg| push_step(shared, id, msg);
+        switch_app(&step, railgun_ledger::eth::RAILGUN_APP_NAME, APP_SWITCH_WAIT_MS).await?;
+    }
     let result = match transport {
         Transport::Legacy => {
             if !calls.is_empty() {
