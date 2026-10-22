@@ -300,3 +300,23 @@ async fn cached_keys_of_another_account_fail_at_the_first_signature() {
     };
     assert!(err.to_string().contains("does not verify"), "got: {err}");
 }
+
+#[tokio::test]
+async fn cached_keys_give_the_same_post_quantum_key_as_the_device() {
+    let from_device = LedgerSigner::connect(MockDevice::new(), ChainId::All, ACCOUNT_INDEX)
+        .await
+        .unwrap();
+    let from_cache = LedgerSigner::from_cached(
+        MockDevice::new(),
+        ChainId::All,
+        ACCOUNT_INDEX,
+        from_device.spending_public_key(),
+        from_device.viewing_key(),
+    );
+
+    // The ML-KEM key is derived from the viewing key, so the cache needs no copy of it.
+    let key = |s: &dyn RailgunSigner| {
+        s.kem_key_pair().unwrap().encapsulation_key().as_bytes().to_vec()
+    };
+    assert_eq!(key(&*from_cache), key(&*from_device));
+}
