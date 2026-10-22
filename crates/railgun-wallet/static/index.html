@@ -121,8 +121,6 @@ pre.log {
 details summary { cursor: pointer; color: var(--steel); font-size: .88rem; margin-top: .6rem; }
 /* Demo mode (?demo in the URL, or Shift+D): blocks marked "dev" are hidden. Without it they show as usual. */
 html.demo .dev { display: none !important; }
-/* The post-quantum address in full, without its scroll box. */
-html.demo #pq-addr { max-height: none !important; overflow: visible !important; }
 </style>
 <script>
 if (new URLSearchParams(location.search).has("demo")) document.documentElement.classList.add("demo");
@@ -249,7 +247,7 @@ if (new URLSearchParams(location.search).has("demo")) document.documentElement.c
         <div class="actions" style="margin-top:.4rem"><button class="quiet" id="btn-copy">Copy</button></div>
         <h2 style="margin-top:.8rem">Post-quantum address</h2>
         <p class="hint">Version 2: the same keys plus this wallet's ML-KEM-768 key. Notes sent to it are encrypted with ML-KEM + ECDH; only wallets holding the key read them.</p>
-        <div class="addr" id="pq-addr" style="max-height:6em;overflow:auto"></div>
+        <div class="addr" id="pq-addr"></div>
         <div class="actions" style="margin-top:.4rem"><button class="quiet" id="btn-copy-pq">Copy</button></div>
       </div>
     </div>
