@@ -122,6 +122,8 @@ pre.log {
 details summary { cursor: pointer; color: var(--steel); font-size: .88rem; margin-top: .6rem; }
 /* Demo mode (?demo in the URL): blocks marked "dev" are hidden. Without it they show as usual. */
 html.demo .dev { display: none !important; }
+/* The post-quantum address in full, without its scroll box. */
+html.demo #pq-addr { max-height: none !important; overflow: visible !important; }
 </style>
 <script>
 if (new URLSearchParams(location.search).has("demo")) document.documentElement.classList.add("demo");
