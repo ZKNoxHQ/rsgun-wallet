@@ -119,7 +119,8 @@ pre.log {
 }
 .banner { border-left: 4px solid var(--fail); background: var(--panel); padding: .6rem .9rem; margin-bottom: 1rem; font-size: .9rem; }
 details summary { cursor: pointer; color: var(--steel); font-size: .88rem; margin-top: .6rem; }
-/* Demo mode (?demo in the URL, or Shift+D): blocks marked "dev" are hidden. Without it they show as usual. */
+/* Demo mode (the "demo mode" box, Shift+D or ?demo in the URL): blocks marked "dev" are hidden.
+   Without it they show as usual. */
 html.demo .dev { display: none !important; }
 </style>
 <script>
@@ -131,6 +132,7 @@ if (new URLSearchParams(location.search).has("demo")) document.documentElement.c
   <h1>Railgun wallet <span class="meta" id="app-version"></span></h1>
   <span class="meta" id="hdr-meta">locked</span>
   <span class="spacer"></span>
+  <label class="check" style="margin:0"><input type="checkbox" id="demo-mode"> demo mode</label>
   <label class="check" style="margin:0"><input type="checkbox" id="auto-sync"> sync every minute</label>
   <button class="quiet" id="btn-sync" disabled>Sync now</button>
   <button class="quiet dev" id="btn-cache" disabled>Empty cache</button>
@@ -732,15 +734,21 @@ $("btn-unlock").addEventListener("click", async () => {
   poll();
 });
 
-// Shift+D outside a text field switches between demo and dev mode, without a reload (the wallet
-// stays open). The URL follows, so a reload keeps the mode.
-document.addEventListener("keydown", (e) => {
-  if (e.key !== "D" || !e.shiftKey || e.ctrlKey || e.altKey || e.metaKey) return;
-  if (e.target.closest?.("input, textarea, select, [contenteditable]")) return;
-  const demo = document.documentElement.classList.toggle("demo");
+// Demo or dev mode, switched without a reload (the wallet stays open): the "demo mode" box, or
+// Shift+D outside a text field. The URL follows, so a reload keeps the mode.
+function setDemo(demo) {
+  document.documentElement.classList.toggle("demo", demo);
+  $("demo-mode").checked = demo;
   const url = new URL(location.href);
   if (demo) url.searchParams.set("demo", ""); else url.searchParams.delete("demo");
   history.replaceState(null, "", url);
+}
+$("demo-mode").checked = document.documentElement.classList.contains("demo");
+$("demo-mode").addEventListener("change", () => setDemo($("demo-mode").checked));
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "D" || !e.shiftKey || e.ctrlKey || e.altKey || e.metaKey) return;
+  if (e.target.closest?.("input, textarea, select, [contenteditable]")) return;
+  setDemo(!document.documentElement.classList.contains("demo"));
 });
 $("btn-lock").addEventListener("click", async () => {
   // A running transaction finishes first: say so rather than look idle.
