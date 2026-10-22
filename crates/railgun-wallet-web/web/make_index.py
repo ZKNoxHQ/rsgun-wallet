@@ -26,6 +26,11 @@ html = html[:i] + '\n<script src="./shim.js"></script>' + html[i:]
 # served from any sub-path (GitHub Pages project site, a folder of a static host)
 must('"/waku-bundle.js"', '"./waku-bundle.js"')
 
+# the static site keeps a Ledger account's keys in IndexedDB: later unlocks ask nothing
+must("reads its Ethereum address and switches back.\")",
+     "reads its Ethereum address and switches back. Once this browser has opened the account, "
+     "it asks nothing.\")")
+
 # where the engine runs, at the bottom of the page
 # hidden in demo mode, like the other blocks marked "dev"
 note = ('<div class="dev" style="margin:18px auto 12px;max-width:1280px;text-align:center;font-size:12px;opacity:.65">'
