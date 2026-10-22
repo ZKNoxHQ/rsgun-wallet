@@ -58,14 +58,8 @@ section { background: var(--panel); border: 1px solid var(--line); border-radius
 section > h2 { font-size: .95rem; font-weight: 600; margin: 0 0 .7rem; }
 p.hint { color: var(--steel); font-size: .85rem; margin: .35rem 0 0; max-width: 68ch; }
 
-/* The rail, one panel across the page: public side on top, shielded side below. */
-.rail { display: grid; gap: .7rem; margin-bottom: 1.25rem; background: var(--panel); border: 1px solid var(--line); border-radius: 3px; padding: .9rem 1.1rem; }
-.rail .side { min-width: 0; }
-.rail .side.shielded { border-left: 4px solid var(--shielded); padding-left: .8rem; }
-.rail .side h2 { font-size: .85rem; font-weight: 600; margin: 0 0 .3rem; color: var(--steel); }
-.rail .track { display: flex; flex-wrap: wrap; gap: .4rem 1.5rem; color: var(--steel); font-size: .8rem; }
-.rail .track .lane { border-top: 2px solid var(--line); padding-top: .2rem; min-width: 6.5rem; text-align: center; }
-.rail .track .lane.on { border-color: var(--shielded); color: var(--ink); font-weight: 600; }
+section h3 { font-size: .85rem; font-weight: 600; margin: .9rem 0 .3rem; color: var(--steel); }
+section h2 + h3 { margin-top: 0; }
 .addr { font-family: var(--mono); font-size: .8rem; word-break: break-all; }
 
 label { display: block; font-size: .85rem; color: var(--steel); margin: .7rem 0 .2rem; }
@@ -232,31 +226,26 @@ if (new URLSearchParams(location.search).has("demo")) document.documentElement.c
 
   <!-- Unlocked view -->
   <div id="view-wallet" hidden>
-    <div class="rail">
-      <div class="side">
-        <h2>Public account</h2>
-        <div class="addr" id="eoa-addr">none</div>
-        <div id="eoa-bal" class="meta"></div>
-      </div>
-      <div class="track" aria-hidden="true">
-        <div class="lane" data-lane="shield">↓ shield</div>
-        <div class="lane" data-lane="transfer">⟳ transfer</div>
-        <div class="lane" data-lane="unshield">↑ unshield</div>
-      </div>
-      <div class="side shielded">
-        <h2>Shielded address</h2>
-        <div class="addr" id="zk-addr"></div>
-        <div class="actions" style="margin-top:.4rem"><button class="quiet" id="btn-copy">Copy</button></div>
-        <h2 style="margin-top:.8rem">Post-quantum address</h2>
-        <div class="addr" id="pq-addr"></div>
-        <div class="actions" style="margin-top:.4rem"><button class="quiet" id="btn-copy-pq">Copy</button></div>
-      </div>
-    </div>
+    <section>
+      <h2>Addresses</h2>
+      <h3>Public address</h3>
+      <div class="addr" id="eoa-addr">none</div>
+      <p class="hint dev" id="eoa-src"></p>
+      <h3>Private address</h3>
+      <div class="addr" id="zk-addr"></div>
+      <div class="actions" style="margin-top:.4rem"><button class="quiet" id="btn-copy">Copy</button></div>
+      <h3>Post-quantum address</h3>
+      <div class="addr" id="pq-addr"></div>
+      <div class="actions" style="margin-top:.4rem"><button class="quiet" id="btn-copy-pq">Copy</button></div>
+    </section>
 
     <div class="layout">
       <div>
         <section>
-          <h2>Shielded balances</h2>
+          <h2>Balances</h2>
+          <h3>Public balances</h3>
+          <div id="eoa-bal" class="meta"></div>
+          <h3>Shielded balances</h3>
           <div id="balances"></div>
           <details><summary>Unspent notes</summary><div id="notes"></div></details>
         </section>
@@ -645,12 +634,12 @@ function render() {
   $("zk-addr").textContent = s.address;
   $("pq-addr").textContent = s.pqAddress || "none";
   $("eoa-addr").textContent = s.eoa || (s.eoaLedger ? "on the Ledger (Ethereum app): read at the first shield" : "none (shielding disabled)");
-  $("eoa-bal").textContent = [s.eoaBalance != null ? `${s.eoaBalance} native` : null, s.eoaSource].filter(Boolean).join(", ");
+  $("eoa-bal").textContent = s.eoaBalance != null ? `${s.eoaBalance} native` : "unknown";
+  $("eoa-src").textContent = s.eoaSource || "";
   $("btn-shield").disabled = busy || !(s.eoa || s.eoaLedger);
   renderBalances(s); renderNotes(s); renderPoi(s); renderTransports(s); renderLegacy(s);
   $("btn-transfer").disabled = busy || !state.transportUsable;
   $("btn-unshield").disabled = busy || !state.transportUsable;
-  document.querySelectorAll(".lane").forEach((l) => l.classList.toggle("on", l.dataset.lane === state.action));
 }
 
 async function poll() {
