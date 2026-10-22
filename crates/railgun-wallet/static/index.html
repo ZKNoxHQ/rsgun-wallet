@@ -726,7 +726,14 @@ $("btn-unlock").addEventListener("click", async () => {
   poll();
 });
 
-$("btn-lock").addEventListener("click", async () => { try { await api("/api/lock", {}); $("log").textContent = ""; } catch (e) { banner(e.message); } poll(); });
+$("btn-lock").addEventListener("click", async () => {
+  // A running transaction finishes first: say so rather than look idle.
+  const btn = $("btn-lock");
+  btn.disabled = true; btn.textContent = "Locking…";
+  try { await api("/api/lock", {}); $("log").textContent = ""; } catch (e) { banner(e.message); }
+  btn.textContent = "Lock";
+  poll();
+});
 $("btn-cache").addEventListener("click", async () => {
   const ok = window.confirm(
     "Empty the local cache of this wallet on this network?\n\n" +
