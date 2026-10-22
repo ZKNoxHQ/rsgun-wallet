@@ -120,7 +120,12 @@ pre.log {
 }
 .banner { border-left: 4px solid var(--fail); background: var(--panel); padding: .6rem .9rem; margin-bottom: 1rem; font-size: .9rem; }
 details summary { cursor: pointer; color: var(--steel); font-size: .88rem; margin-top: .6rem; }
+/* Demo mode (?demo in the URL): blocks marked "dev" are hidden. Without it they show as usual. */
+html.demo .dev { display: none !important; }
 </style>
+<script>
+if (new URLSearchParams(location.search).has("demo")) document.documentElement.classList.add("demo");
+</script>
 </head>
 <body>
 <header class="bar">
@@ -129,7 +134,7 @@ details summary { cursor: pointer; color: var(--steel); font-size: .88rem; margi
   <span class="spacer"></span>
   <label class="check" style="margin:0"><input type="checkbox" id="auto-sync"> sync every minute</label>
   <button class="quiet" id="btn-sync" disabled>Sync now</button>
-  <button class="quiet" id="btn-cache" disabled>Empty cache</button>
+  <button class="quiet dev" id="btn-cache" disabled>Empty cache</button>
   <button class="quiet" id="btn-lock" disabled>Lock</button>
 </header>
 
@@ -147,7 +152,7 @@ details summary { cursor: pointer; color: var(--steel); font-size: .88rem; margi
           <option value="1">Ethereum mainnet</option>
         </select>
       </div>
-      <div>
+      <div class="dev">
         <label for="f-rpc">RPC URL</label>
         <input type="text" id="f-rpc" autocomplete="off">
       </div>
@@ -167,7 +172,7 @@ details summary { cursor: pointer; color: var(--steel); font-size: .88rem; margi
     <p class="hint">Prefilled with the public test phrase (“yellow” twelve times). Anyone can spend from it: test networks only.</p>
     </div>
     <div class="row">
-      <div id="wrap-derivation">
+      <div id="wrap-derivation" class="dev">
         <label for="f-derivation">Key derivation</label>
         <select id="f-derivation">
           <option value="railgun">Railgun (same address as Railway)</option>
@@ -179,7 +184,7 @@ details summary { cursor: pointer; color: var(--steel); font-size: .88rem; margi
         <input type="number" id="f-index" min="0" value="0">
       </div>
     </div>
-    <details id="wrap-rawkeys">
+    <details id="wrap-rawkeys" class="dev">
       <summary>Use raw spending and viewing keys instead</summary>
       <div class="row">
         <div><label for="f-spend">Spending key (hex)</label><input type="password" id="f-spend" autocomplete="off"></div>
@@ -193,7 +198,7 @@ details summary { cursor: pointer; color: var(--steel); font-size: .88rem; margi
     <label class="check"><input type="checkbox" id="f-eoa-ledger"> Public account on the Ledger (Ethereum app)</label>
     <p class="hint">Shields are signed by the Ledger's Ethereum app (m/44'/60'/index'/0/0: account index + 1 in Ledger Live), over USB. The device runs one app at a time: when you shield, the wallet asks you to open the Ethereum app, then to reopen the Railgun app. Enable <b>Blind signing</b> in the Ethereum app's settings: it cannot decode the shield call.</p>
 
-    <div class="row">
+    <div class="row dev">
       <div><label for="f-bundler">Bundler URL (4337)</label><input type="text" id="f-bundler" autocomplete="off"></div>
       <div>
         <label for="f-wakumode">Waku node (legacy)</label>
@@ -204,14 +209,16 @@ details summary { cursor: pointer; color: var(--steel); font-size: .88rem; margi
         </select>
       </div>
     </div>
-    <div class="row" id="row-wakuurl" hidden>
+    <div class="row dev" id="row-wakuurl" hidden>
       <div><label for="f-waku">nwaku REST URL</label><input type="text" id="f-waku" autocomplete="off"></div>
       <div></div>
     </div>
+    <div class="dev">
     <label for="f-trusted">Trusted fee signers (legacy, 0zk addresses)</label>
     <textarea id="f-trusted" autocomplete="off" spellcheck="false"></textarea>
     <p class="hint">Broadcasters are only used when their rate is between 10% under and 30% over the rate these signers announce (averaged). Prefilled with the four signers of the Railway wallet: using them means trusting that team for the reference rate. Required on mainnet. On Sepolia, write “none” to accept any authenticated offer if these signers announce nothing there.</p>
-    <div class="row">
+    </div>
+    <div class="row dev">
       <div><label class="check" style="margin-top:.8rem"><input type="checkbox" id="f-poi" checked> Proof of innocence (required on mainnet and Sepolia)</label></div>
     </div>
 
@@ -253,7 +260,7 @@ details summary { cursor: pointer; color: var(--steel); font-size: .88rem; margi
           <div id="balances"></div>
           <details><summary>Unspent notes</summary><div id="notes"></div></details>
         </section>
-        <section>
+        <section class="dev">
           <h2>Proofs of innocence waiting for submission</h2>
           <div id="poi"></div>
           <p class="hint">Each private transaction needs a follow-up proof before its change notes become spendable. Proofs are generated and submitted during sync, once the transaction is indexed. Transactions made before this wallet was opened here, or with another wallet, are detected and proved the same way. An entry whose transaction never reached the chain (a relayer that did not answer) is removed at the first sync 15 minutes after the proof.</p>
@@ -265,7 +272,7 @@ details summary { cursor: pointer; color: var(--steel); font-size: .88rem; margi
           <h2>Send through</h2>
           <div class="tabs" id="transport-tabs" role="tablist"></div>
           <p class="hint" id="transport-note"></p>
-          <div class="diag" id="transport-diag" hidden></div>
+          <div class="diag dev" id="transport-diag" hidden></div>
           <label class="check"><input type="checkbox" id="pq-change"> Post-quantum change notes also for legacy transfers (a transfer to a version 2 address always gets them; wallets without this wallet's ML-KEM key will not see them)</label>
           <div id="aa-options" hidden>
             <label class="check"><input type="checkbox" id="aa-single"> Prove once (one signature per operation, for hardware and threshold signers)</label>
@@ -335,7 +342,7 @@ details summary { cursor: pointer; color: var(--steel); font-size: .88rem; margi
           <div id="jobs"></div>
         </section>
 
-        <section>
+        <section class="dev">
           <h2>SDK log</h2>
           <pre class="log" id="log"></pre>
         </section>
