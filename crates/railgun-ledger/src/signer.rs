@@ -97,6 +97,27 @@ impl<E: Exchange> LedgerSigner<E> {
         }))
     }
 
+    /// Builds the signer from the spending public key and viewing key a previous
+    /// [`Self::connect`] returned, without asking the device anything: unlocking needs no
+    /// approval. Only [`RailgunSigner::sign`] reaches the device, and every signature is
+    /// verified against `spending_pubkey`, so keys of another device, account or passphrase
+    /// fail at the first signature, before anything is sent.
+    pub fn from_cached(
+        device: E,
+        chain_id: ChainId,
+        account_index: u32,
+        spending_pubkey: SpendingPublicKey,
+        viewing_key: ViewingKey,
+    ) -> Arc<Self> {
+        Arc::new(Self {
+            device,
+            account_index,
+            chain_id,
+            spending_pubkey,
+            viewing_key,
+        })
+    }
+
     /// The underlying transport, e.g. to reuse the connection for another device app.
     pub fn device(&self) -> &E {
         &self.device

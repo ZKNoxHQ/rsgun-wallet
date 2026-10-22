@@ -37,6 +37,7 @@ struct MockDevice {
     stale_handle: AtomicBool,
     reconnects: AtomicUsize,
     spending_pubkey_requests: AtomicUsize,
+    exchanges: AtomicUsize,
 }
 
 impl MockDevice {
@@ -49,6 +50,7 @@ impl MockDevice {
             stale_handle: AtomicBool::new(false),
             reconnects: AtomicUsize::new(0),
             spending_pubkey_requests: AtomicUsize::new(0),
+            exchanges: AtomicUsize::new(0),
         }
     }
 }
@@ -58,6 +60,7 @@ impl Exchange for MockDevice {
     async fn exchange(&self, apdu: &Apdu) -> Result<ApduResponse, TransportError> {
         assert_eq!(apdu.cla, CLA);
         assert_eq!(apdu.p2, 0);
+        self.exchanges.fetch_add(1, Ordering::SeqCst);
 
         let ok = |data: Vec<u8>| {
             Ok(ApduResponse {
@@ -255,4 +258,45 @@ async fn stale_handle_is_reconnected_once_and_signing_succeeds() {
 
     assert!(ledger.spending_public_key().verify(message, &signature));
     assert_eq!(ledger.device().reconnects.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
+async fn cached_keys_open_without_the_device_and_still_sign() {
+    let software = software_signer();
+    let ledger = LedgerSigner::from_cached(
+        MockDevice::new(),
+        ChainId::All,
+        ACCOUNT_INDEX,
+        software.spending_public_key(),
+        software.viewing_key(),
+    );
+
+    assert_eq!(ledger.address(), software.address());
+    assert_eq!(ledger.device().exchanges.load(Ordering::SeqCst), 0);
+
+    let message = U256::from(5u64);
+    let signature = ledger.sign(message).await.unwrap();
+    assert!(software.spending_public_key().verify(message, &signature));
+    assert_eq!(ledger.device().exchanges.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
+async fn cached_keys_of_another_account_fail_at_the_first_signature() {
+    let other = PrivateKeySigner::new(
+        SpendingKey::from_hex(&hex::encode([7u8; 32])).unwrap(),
+        ViewingKey::from_hex(&hex::encode([9u8; 32])).unwrap(),
+        ChainId::All,
+    );
+    let ledger = LedgerSigner::from_cached(
+        MockDevice::new(),
+        ChainId::All,
+        ACCOUNT_INDEX,
+        other.spending_public_key(),
+        other.viewing_key(),
+    );
+
+    let Err(err) = ledger.sign(U256::from(1u64)).await else {
+        panic!("signing must fail");
+    };
+    assert!(err.to_string().contains("does not verify"), "got: {err}");
 }

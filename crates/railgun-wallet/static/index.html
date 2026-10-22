@@ -707,7 +707,7 @@ $("btn-unlock").addEventListener("click", async () => {
   $("unlock-msg").textContent = ledger
     ? (ledgerTransport === "ble"
         ? "Opening over Bluetooth: scanning for the Ledger, then confirm the three prompts on it…"
-        : "Opening: if the Ledger asks to open the ZKNOX app, accept, then confirm the three prompts on it (spending key, viewing key, viewing pubkey)…")
+        : "Opening: if the Ledger asks to open the ZKNOX app, accept, then confirm its prompts (spending key, viewing key). With the public account on the Ledger, the wallet then reads its Ethereum address and switches back.")
     : "Opening: loading the local database and registering the keys…";
   banner("");
   try {

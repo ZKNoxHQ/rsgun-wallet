@@ -42,7 +42,7 @@ use railgun_broadcaster::{
     BroadcastRequest, BroadcasterClient, ClientError, FeeQuote, NoQuote, NwakuRest, WakuTransport,
     PAR_RATE_WRAPPED_BASE_TOKEN, RelayAction, fees::now_ms as quote_now_ms, token_fee,
 };
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use userop_kit::{
@@ -204,6 +204,8 @@ struct Session {
     /// The spending signer is the Ledger over USB: private operations first bring its Railgun
     /// app to the front.
     ledger_usb: bool,
+    /// Account index of a Ledger signer, whose cached keys "Empty cache" also forgets.
+    ledger_index: Option<u32>,
     /// The wallet's IndexedDB database, also holding the Ledger Ethereum address once read.
     db: Store,
     eoa_source: Option<String>,
@@ -414,9 +416,16 @@ impl Actor {
                     None => Err(anyhow!("open the wallet first: the cache is per wallet")),
                     Some(session) => {
                         let name = session.db_name.clone();
+                        let ledger_index = session.ledger_index;
                         drop(session);
+                        if let Some(index) = ledger_index {
+                            forget_ledger_keys(index).await;
+                        }
                         match delete_db(&name).await {
-                            Ok(_) => Ok(format!("IndexedDB database {name}")),
+                            Ok(_) => Ok(format!(
+                                "IndexedDB database {name}{}",
+                                if ledger_index.is_some() { " and the Ledger keys" } else { "" }
+                            )),
                             Err(e) => Err(anyhow!("deleting {name}: {e:?}")),
                         }
                     }
@@ -461,12 +470,47 @@ impl Actor {
 
         let ledger_usb = p.ledger && p.ledger_transport.as_deref().unwrap_or("usb") == "usb";
         // Chain-agnostic address (RgChainId::All), as Railway displays it.
+        // The Ledger's Ethereum address, when the cache or this unlock knows it.
+        let mut ledger_eth: Option<Address> = None;
         let (signer, derivation): (Arc<dyn RailgunSigner>, &'static str) = if p.ledger {
-            match p.ledger_transport.as_deref().unwrap_or("usb") {
-                "usb" => {
+            let usb = match p.ledger_transport.as_deref().unwrap_or("usb") {
+                "usb" => true,
+                "ble" | "bluetooth" => false,
+                other => bail!("unknown Ledger transport {other:?} (use \"usb\" or \"ble\")"),
+            };
+            let cached = read_ledger_keys(p.index).await;
+            let cached_keys = cached.as_ref().and_then(LedgerKeys::keys);
+            let signer: Arc<dyn RailgunSigner> = match (usb, cached_keys) {
+                // From the cache: nothing to approve, any app may be open. The device is only
+                // needed to sign, and the Railgun app is brought to the front then.
+                (true, Some((spending_pubkey, viewing_key))) => {
                     // The page granted USB access during the unlock click (shim.js); in this
-                    // worker getDevices() then hands the device over without a picker. The
-                    // Railgun app is opened first when the device shows another one.
+                    // worker getDevices() then hands the device over without a picker.
+                    let device = railgun_ledger::transport::webusb::WebUsbLedger::connect_existing()
+                        .await
+                        .map_err(|e| anyhow!("Ledger: {e} (plugged in and unlocked?)"))?;
+                    railgun_ledger::LedgerSigner::from_cached(
+                        device,
+                        RgChainId::All,
+                        p.index,
+                        spending_pubkey,
+                        viewing_key,
+                    )
+                }
+                (false, Some((spending_pubkey, viewing_key))) => {
+                    let device = crate::ble_bridge::BridgedBleLedger::connect()
+                        .await
+                        .map_err(|e| anyhow!("Ledger over BLE: {e}"))?;
+                    railgun_ledger::LedgerSigner::from_cached(
+                        device,
+                        RgChainId::All,
+                        p.index,
+                        spending_pubkey,
+                        viewing_key,
+                    )
+                }
+                // From the device: its approvals, the Railgun app opened first over USB.
+                (true, None) => {
                     let device = switch_app(
                         &|msg| tracing::info!("{msg}"),
                         railgun_ledger::eth::RAILGUN_APP_NAME,
@@ -474,27 +518,44 @@ impl Actor {
                     )
                     .await
                     .map_err(|e| anyhow!("Ledger: {e:#} (plugged in and unlocked?)"))?;
-                    let signer =
-                        railgun_ledger::LedgerSigner::connect(device, RgChainId::All, p.index)
-                            .await
-                            .map_err(|e| anyhow!("Ledger Railgun app: {e}"))?;
-                    (signer as Arc<dyn RailgunSigner>, "ledger")
+                    railgun_ledger::LedgerSigner::connect(device, RgChainId::All, p.index)
+                        .await
+                        .map_err(|e| anyhow!("Ledger Railgun app: {e}"))?
                 }
-                "ble" | "bluetooth" => {
+                (false, None) => {
                     // The page owns the GATT session (Web Bluetooth is main-thread-only);
                     // shim.js connected it during the unlock click. This speaks the Ledger
                     // framing over the page bridge.
                     let device = crate::ble_bridge::BridgedBleLedger::connect()
                         .await
                         .map_err(|e| anyhow!("Ledger over BLE: {e}"))?;
-                    let signer =
-                        railgun_ledger::LedgerSigner::connect(device, RgChainId::All, p.index)
-                            .await
-                            .map_err(|e| anyhow!("Ledger Railgun app: {e}"))?;
-                    (signer as Arc<dyn RailgunSigner>, "ledger")
+                    railgun_ledger::LedgerSigner::connect(device, RgChainId::All, p.index)
+                        .await
+                        .map_err(|e| anyhow!("Ledger Railgun app: {e}"))?
                 }
-                other => bail!("unknown Ledger transport {other:?} (use \"usb\" or \"ble\")"),
+            };
+            if cached_keys.is_some() {
+                tracing::info!("Ledger account {}: keys from this browser's cache", p.index);
             }
+            ledger_eth = cached.as_ref().and_then(|k| k.eth_address(p.index));
+            // The Ethereum address, read once without a prompt: over USB the wallet switches to
+            // the Ethereum app and back. Best effort: without it, the first shield reads it.
+            if usb && p.eoa_ledger && ledger_eth.is_none() {
+                match read_ledger_eth_address(p.index).await {
+                    Ok(address) => ledger_eth = Some(address),
+                    Err(e) => tracing::warn!("Ledger Ethereum address not read at unlock: {e:#}"),
+                }
+            }
+            let keys = LedgerKeys::new(
+                signer.spending_public_key(),
+                &signer.viewing_key(),
+                p.index,
+                ledger_eth,
+            );
+            if cached.as_ref() != Some(&keys) {
+                write_ledger_keys(p.index, &keys).await;
+            }
+            (signer, "ledger")
         } else {
             let (rgkeys, derivation): (keys::RailgunKeys, &'static str) =
                 match (&p.mnemonic, &p.spending_key, &p.viewing_key) {
@@ -583,13 +644,7 @@ impl Actor {
         let name = format!("rgw-{}-{tag}", chain.id);
         let db = JsKvStore::store(open_db(&name).unchecked_into());
         let eoa_ledger = if p.eoa_ledger {
-            let cached = db
-                .get(ledger_eoa_key(p.index))
-                .await
-                .ok()
-                .flatten()
-                .and_then(|b| (b.len() == 20).then(|| Address::from_slice(&b)));
-            Some(LedgerEoa { index: p.index, address: cached })
+            Some(LedgerEoa { index: p.index, address: ledger_eth })
         } else {
             None
         };
@@ -666,6 +721,7 @@ impl Actor {
             eoa_source,
             eoa_ledger,
             ledger_usb,
+            ledger_index: p.ledger.then_some(p.index),
             db,
             signer,
             railgun,
@@ -933,13 +989,99 @@ async fn resolve_amount(
 /// The public account when it lives on the Ledger's Ethereum app.
 struct LedgerEoa {
     index: u32,
-    /// Read from the device at the first shield, then cached in the wallet's database.
+    /// From the Ledger key cache, read at unlock or at the first shield.
     address: Option<Address>,
 }
 
-/// Keyed by path: an address cached under an earlier derivation of the same index is not reused.
-fn ledger_eoa_key(index: u32) -> Vec<u8> {
-    format!("zknox:ledger-eth-address:{}", railgun_ledger::eth::eth_path(index)).into_bytes()
+/// IndexedDB database of the Ledger key cache, one entry per account index, shared by every
+/// chain (the keys are chain-agnostic).
+const LEDGER_CACHE_DB: &str = "rgw-ledger";
+
+/// What a Ledger account exported once, so later unlocks ask the device nothing. Stored
+/// unencrypted: the viewing key reads the account's history but cannot spend, and signatures
+/// still come from the device.
+#[derive(Serialize, Deserialize, PartialEq)]
+struct LedgerKeys {
+    spending_pubkey: railgun::crypto::keys::SpendingPublicKey,
+    /// Hex of the viewing private key.
+    viewing_key: String,
+    /// The Ethereum account and its path: an address read under another derivation of the
+    /// same index is not reused.
+    #[serde(default)]
+    eth: Option<(Address, String)>,
+}
+
+impl LedgerKeys {
+    fn new(
+        spending_pubkey: railgun::crypto::keys::SpendingPublicKey,
+        viewing_key: &railgun::crypto::keys::ViewingKey,
+        index: u32,
+        eth_address: Option<Address>,
+    ) -> Self {
+        use railgun::crypto::keys::HexKey;
+        Self {
+            spending_pubkey,
+            viewing_key: viewing_key.to_hex(),
+            eth: eth_address.map(|a| (a, railgun_ledger::eth::eth_path(index))),
+        }
+    }
+
+    fn keys(
+        &self,
+    ) -> Option<(railgun::crypto::keys::SpendingPublicKey, railgun::crypto::keys::ViewingKey)> {
+        use railgun::crypto::keys::HexKey;
+        let viewing_key = railgun::crypto::keys::ViewingKey::from_hex(&self.viewing_key).ok()?;
+        Some((self.spending_pubkey, viewing_key))
+    }
+
+    fn eth_address(&self, index: u32) -> Option<Address> {
+        self.eth
+            .as_ref()
+            .filter(|(_, path)| *path == railgun_ledger::eth::eth_path(index))
+            .map(|(address, _)| *address)
+    }
+}
+
+fn ledger_cache() -> Store {
+    JsKvStore::store(open_db(LEDGER_CACHE_DB).unchecked_into())
+}
+
+fn ledger_keys_key(index: u32) -> Vec<u8> {
+    format!("zknox:ledger-keys:{index}").into_bytes()
+}
+
+async fn read_ledger_keys(index: u32) -> Option<LedgerKeys> {
+    let bytes = ledger_cache().get(ledger_keys_key(index)).await.ok().flatten()?;
+    serde_json::from_slice(&bytes).ok()
+}
+
+async fn write_ledger_keys(index: u32, keys: &LedgerKeys) {
+    let Ok(bytes) = serde_json::to_vec(keys) else {
+        return;
+    };
+    if let Err(e) = ledger_cache().put(ledger_keys_key(index), &bytes).await {
+        tracing::warn!("Ledger key cache not saved: {e}");
+    }
+}
+
+async fn forget_ledger_keys(index: u32) {
+    let _ = ledger_cache().delete(ledger_keys_key(index)).await;
+}
+
+/// The Ethereum address of the Ledger account at `index`, read from the Ethereum app without
+/// a prompt, then back to the Railgun app (best effort: a private operation reopens it).
+async fn read_ledger_eth_address(index: u32) -> Result<Address> {
+    let step = |msg: String| tracing::info!("{msg}");
+    let device =
+        switch_app(&step, railgun_ledger::eth::ETHEREUM_APP_NAME, APP_SWITCH_WAIT_MS).await?;
+    let path = railgun_ledger::eth::eth_path(index);
+    let read = railgun_ledger::eth::get_address(&device, &path, false).await;
+    drop(device);
+    let _ = switch_app(&step, railgun_ledger::eth::RAILGUN_APP_NAME, 60_000).await;
+    let (_, address) = read.map_err(|e| anyhow!("Ledger Ethereum app: {e}"))?;
+    let address = Address::from_str(&address).map_err(|e| anyhow!("Ledger address: {e}"))?;
+    tracing::info!("Ledger public account {address} ({path})");
+    Ok(address)
 }
 
 /// The public account's address, when known.
@@ -1084,7 +1226,12 @@ async fn eoa_signing(s: &mut Session, shared: &SharedRef, id: u64) -> Result<(Eo
         }
     }
     push_step(shared, id, format!("public account {address} ({path})"));
-    let _ = s.db.put(ledger_eoa_key(index), address.as_slice()).await;
+    if let Some(mut keys) = read_ledger_keys(index).await {
+        if keys.eth_address(index) != Some(address) {
+            keys.eth = Some((address, path.clone()));
+            write_ledger_keys(index, &keys).await;
+        }
+    }
     if let Some(l) = s.eoa_ledger.as_mut() {
         l.address = Some(address);
     }
