@@ -4663,7 +4663,7 @@ dependencies = [
 [[package]]
 name = "kohaku-crypto"
 version = "0.1.0"
-source = "git+https://github.com/ZKNoxHQ/kohaku-rs?branch=zknox%2Fdev-pq#610c3ca66df8f0352fb456868d18b459252aa17f"
+source = "git+https://github.com/ZKNoxHQ/kohaku-rs?branch=zknox%2Fdev-pq#44ee11f86a8fc08dc4c2fd7de792b615adbba720"
 dependencies = [
  "ark-bn254",
  "ark-ff 0.6.0",
@@ -4672,15 +4672,13 @@ dependencies = [
  "num-traits",
  "poseidon-rust",
  "ruint",
- "serde",
  "thiserror 2.0.21",
- "tracing",
 ]
 
 [[package]]
 name = "kohaku-eip-1193"
 version = "0.1.0"
-source = "git+https://github.com/ZKNoxHQ/kohaku-rs?branch=zknox%2Fdev-pq#610c3ca66df8f0352fb456868d18b459252aa17f"
+source = "git+https://github.com/ZKNoxHQ/kohaku-rs?branch=zknox%2Fdev-pq#44ee11f86a8fc08dc4c2fd7de792b615adbba720"
 dependencies = [
  "alloy",
  "async-trait",
@@ -4694,20 +4692,17 @@ dependencies = [
 ]
 
 [[package]]
-name = "kohaku-kv-store"
+name = "kohaku-merkle-tree"
 version = "0.1.0"
-source = "git+https://github.com/ZKNoxHQ/kohaku-rs?branch=zknox%2Fdev-pq#610c3ca66df8f0352fb456868d18b459252aa17f"
+source = "git+https://github.com/ZKNoxHQ/kohaku-rs?branch=zknox%2Fdev-pq#44ee11f86a8fc08dc4c2fd7de792b615adbba720"
 dependencies = [
- "async-trait",
- "redb",
  "thiserror 2.0.21",
- "tokio",
 ]
 
 [[package]]
 name = "kohaku-railgun"
 version = "0.1.0"
-source = "git+https://github.com/ZKNoxHQ/kohaku-rs?branch=zknox%2Fdev-pq#610c3ca66df8f0352fb456868d18b459252aa17f"
+source = "git+https://github.com/ZKNoxHQ/kohaku-rs?branch=zknox%2Fdev-pq#44ee11f86a8fc08dc4c2fd7de792b615adbba720"
 dependencies = [
  "aes",
  "aes-gcm",
@@ -4736,7 +4731,7 @@ dependencies = [
  "js-sys",
  "kohaku-crypto",
  "kohaku-eip-1193",
- "kohaku-kv-store",
+ "kohaku-merkle-tree",
  "kohaku-userop-kit",
  "libcrux-ml-kem",
  "num-bigint",
@@ -4759,7 +4754,7 @@ dependencies = [
 [[package]]
 name = "kohaku-userop-kit"
 version = "0.1.0"
-source = "git+https://github.com/ZKNoxHQ/kohaku-rs?branch=zknox%2Fdev-pq#610c3ca66df8f0352fb456868d18b459252aa17f"
+source = "git+https://github.com/ZKNoxHQ/kohaku-rs?branch=zknox%2Fdev-pq#44ee11f86a8fc08dc4c2fd7de792b615adbba720"
 dependencies = [
  "alloy",
  "alloy-sol-types",
@@ -6212,7 +6207,7 @@ dependencies = [
 [[package]]
 name = "poseidon-rust"
 version = "0.1.0"
-source = "git+https://github.com/ZKNoxHQ/kohaku-rs?branch=zknox%2Fdev-pq#610c3ca66df8f0352fb456868d18b459252aa17f"
+source = "git+https://github.com/ZKNoxHQ/kohaku-rs?branch=zknox%2Fdev-pq#44ee11f86a8fc08dc4c2fd7de792b615adbba720"
 dependencies = [
  "ark-bn254",
  "ark-ff 0.6.0",
@@ -6952,15 +6947,6 @@ dependencies = [
  "rustls-pki-types",
  "time",
  "yasna 0.5.2",
-]
-
-[[package]]
-name = "redb"
-version = "4.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fb338a6c67830a61bed824b78c2bb034ab1ff401a20616bd7957524f4fdc2f22"
-dependencies = [
- "libc",
 ]
 
 [[package]]
