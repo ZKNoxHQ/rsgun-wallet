@@ -25,6 +25,7 @@ use alloy::{
 use anyhow::{Context, Result, anyhow, bail};
 use eip_1193_provider::tx_data::TxData;
 use railgun::{
+    RailgunState,
     account::{
         address::{PqRailgunAddress, RailgunAddress},
         chain::ChainId as RgChainId,
@@ -35,7 +36,7 @@ use railgun::{
     chain_config::ChainConfig,
     crypto::keys::SpendingPublicKey,
     provider::RailgunProvider,
-    transact::{NoteEncryption, TransactionBuilder},
+    transact::{AmountIntents, NoteEncryption, Spend},
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -44,7 +45,6 @@ use tokio::sync::{mpsc, oneshot};
 use tracing::{error, info, warn};
 use userop_kit::{
     bundler::{Bundler, pimlico::PimlicoBundler},
-    user_operation::UserOperationGasEstimate,
     smart_account::simple_smart_account::{Call, SimpleSmartAccount},
 };
 
@@ -133,17 +133,6 @@ fn write_ledger_cache(path: &Path, spending_pubkey: SpendingPublicKey, address: 
 /// A broadcaster of the reference implementation takes its gas cost plus a margin of 10 to
 /// 30%. Half as much again leaves room for that and refuses anything predatory.
 const DEFAULT_MAX_FEE_RATE: &str = "1.5";
-
-/// Margin on the simulated limits. The dominant one, the paymaster validation, needs 8.0 to
-/// 8.4% more than the gas the probe sees it use (63/64 forwarding over the nested calls; four
-/// live measurements on Sepolia, transfers and unshields). 12% leaves about 3.5% above that.
-/// The user pays for limits, not for gas used, and nothing is refunded: every point here is a
-/// point of fee.
-const DEFAULT_GAS_MARGIN_PERCENT: u32 = 12;
-const MAX_GAS_MARGIN_PERCENT: u32 = 200;
-
-/// Limits are rounded up to this, so the public fee says less about the transaction.
-const GAS_BUCKET: u128 = 10_000;
 
 /// The draw is among offers at most this much above the cheapest, as in the reference client.
 const BROADCASTER_DRAW_PERCENT: u32 = 10;
@@ -313,13 +302,11 @@ pub struct FeeLimits {
     pub max_fee_rate: Option<String>,
     /// Highest accepted fee for the whole transaction, in wrapped base token ("0.002").
     pub max_fee: Option<String>,
-    /// 4337: prove once, with gas limits fixed beforehand from a learned profile plus a margin,
-    /// instead of re-proving until the fee converges. One spending signature per operation,
-    /// which is what a hardware or threshold signer needs.
+    /// 4337: prove once, with gas limits fixed beforehand from the bundler's estimate of the
+    /// dummy-proof operation, instead of re-proving until the fee converges. One spending
+    /// signature per operation, which is what a hardware or threshold signer needs.
     #[serde(default)]
     pub single_proof: bool,
-    /// Margin added to the limits in single-proof mode, percent. Defaults to 12.
-    pub gas_margin_percent: Option<u32>,
     /// Encrypt the change notes with the post-quantum scheme, to this wallet's own ML-KEM key.
     /// Wallets without that key (legacy ones on the same seed) will not see the change.
     #[serde(default)]
@@ -346,7 +333,7 @@ impl Op {
 pub enum Command {
     Unlock(Box<UnlockParams>, oneshot::Sender<Result<(), String>>),
     Lock(oneshot::Sender<()>),
-    /// Deletes the local database of the open wallet and locks it.
+    /// Deletes the state snapshot of the open wallet and locks it.
     EmptyCache(oneshot::Sender<Result<String, String>>),
     Job { id: u64, op: Op },
 }
@@ -364,6 +351,8 @@ struct Session {
     eoa_source: Option<String>,
     signer: Arc<dyn RailgunSigner>,
     railgun: RailgunProvider,
+    /// The state `railgun` works on, kept to write snapshots of it to `data_dir`.
+    state: RailgunState,
     derivation: &'static str,
     bundler_url: String,
     data_dir: PathBuf,
@@ -477,6 +466,9 @@ impl Engine {
                     id,
                 };
                 let res = self.run(&ctx, op).await;
+                // Whatever the outcome: a snapshot is consistent at any point, and a failed
+                // command may still have synced or registered pending POI work worth keeping.
+                self.persist_state();
                 self.refresh_snapshot().await;
                 match res {
                     Ok(value) => self.set_job(id, |j| {
@@ -504,6 +496,16 @@ impl Engine {
         }
     }
 
+    /// Writes the session's SDK state to disk. A failure is logged, not fatal: the state is
+    /// still in memory and the next command tries again.
+    fn persist_state(&self) {
+        if let Some(s) = &self.session {
+            if let Err(e) = s.persist() {
+                error!("saving the wallet state failed: {e:#}");
+            }
+        }
+    }
+
     /// Removes everything the wallet cached for the open account on this chain: synced
     /// commitments, decrypted notes, txid trees, pending POI entries. Keys are not on disk, so
     /// the wallet is locked and has to be reopened; the first sync is then a full one. Proofs
@@ -515,7 +517,8 @@ impl Engine {
             .take()
             .ok_or_else(|| anyhow!("open the wallet first: the cache is per account and chain"))?;
         let data_dir = session.data_dir.clone();
-        // Closes the database handles and stops the fee monitor before touching the files.
+        // Drops the in-memory state and stops the fee monitor before touching the files, so
+        // nothing writes a snapshot back after the deletion.
         drop(session);
         if let Ok(mut s) = self.shared.status.write() {
             *s = StatusSnapshot {
@@ -527,7 +530,8 @@ impl Engine {
             *l = LegacyStatus::default();
         }
 
-        let mut removed = Vec::new();
+        // The snapshot of this version, then the directories of earlier versions.
+        let mut removed = db::delete(&data_dir)?;
         for entry in std::fs::read_dir(&data_dir).with_context(|| format!("reading {}", data_dir.display()))? {
             let path = entry?.path();
             let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("").to_string();
@@ -686,14 +690,18 @@ impl Engine {
                 info!(from = %legacy_dir.display(), to = %data_dir.display(), "wallet directory migrated");
             }
         }
-        let db = db::open(&data_dir)?;
+        let state = db::open(&data_dir)?;
 
-        let mut builder = RailgunBuilder::new(chain.clone(), provider.clone()).with_database(db);
+        let mut builder =
+            RailgunBuilder::new(chain.clone(), provider.clone()).with_state(state.clone());
         if p.poi {
             builder = builder.with_poi();
         }
         let mut railgun = builder.build().await.context("building railgun provider")?;
         railgun.register(signer.clone()).await?;
+        // Registering records the account in the state. Saving now also proves the directory is
+        // writable before anything is synced or proved.
+        db::save(&data_dir, &state).context("saving the wallet state")?;
 
         let bundler_url = p
             .bundler_url
@@ -758,6 +766,7 @@ impl Engine {
             eoa_source,
             signer,
             railgun,
+            state,
             derivation,
             bundler_url,
             data_dir,
@@ -799,7 +808,7 @@ impl Engine {
                     ctx.step("note to the recipient encrypted with ML-KEM-768 + ECDH (post-quantum)");
                 }
                 let (asset, value, _) = s.resolve_amount(&asset, &amount).await?;
-                let builder = TransactionBuilder::new().transfer_with_encryption(
+                let intents = AmountIntents::new().transfer_with_encryption(
                     s.signer.clone() as Arc<dyn RailgunSigner>,
                     to,
                     asset,
@@ -807,7 +816,7 @@ impl Engine {
                     &memo,
                     encryption,
                 );
-                s.submit(ctx, builder, transport, Vec::new(), None, None).await
+                s.submit(ctx, intents, transport, Vec::new(), None, None).await
             }
             Op::Unshield {
                 to,
@@ -966,8 +975,8 @@ impl Session {
         let signer = self.signer.clone() as Arc<dyn RailgunSigner>;
 
         if !native {
-            let builder = TransactionBuilder::new().unshield(signer, to, asset_id, value)?;
-            return self.submit(ctx, builder, transport, Vec::new(), None, None).await;
+            let intents = AmountIntents::new().unshield(signer, to, asset_id, value)?;
+            return self.submit(ctx, intents, transport, Vec::new(), None, None).await;
         }
 
         if token != self.chain.wrapped_base_token {
@@ -978,15 +987,15 @@ impl Session {
             // contract, which unwraps its whole balance and forwards the native currency in the
             // same EVM transaction (RelayAdapt.relay). The recipient and the unwrap are bound
             // into the proofs through adaptParams: whoever submits carries bytes it cannot alter.
+            // `submit` binds the action once the spends are final (fee note included).
             let relay_adapt = self.chain.relay_adapt_contract;
             let mut action = RelayAction::unshield_base_token(relay_adapt, to, &mut rand::rng());
             // As the community engine: all or nothing when we send it ourselves; through a
             // broadcaster the Railgun transaction must land even if a call fails, since the
             // fee is paid either way.
             action.require_success = transport == Transport::Direct;
-            let builder =
-                action.bind(TransactionBuilder::new().unshield(signer, relay_adapt, asset_id, value)?);
-            return self.submit(ctx, builder, transport, Vec::new(), None, Some(action)).await;
+            let intents = AmountIntents::new().unshield(signer, relay_adapt, asset_id, value)?;
+            return self.submit(ctx, intents, transport, Vec::new(), None, Some(action)).await;
         }
 
         // The wrapped token lands on the ephemeral 7702 sender, which unwraps it and forwards the
@@ -1010,17 +1019,19 @@ impl Session {
                 data: Default::default(),
             },
         ];
-        let builder = TransactionBuilder::new().unshield(signer, sender.address(), asset_id, value)?;
-        self.submit(ctx, builder, transport, calls, Some(sender), None).await
+        let intents = AmountIntents::new().unshield(signer, sender.address(), asset_id, value)?;
+        self.submit(ctx, intents, transport, calls, Some(sender), None).await
     }
 
-    /// Proves and submits a private transaction over the selected transport. `relay` is the
-    /// RelayAdapt action `builder` was bound to, if any: the proved transaction is then sent as
-    /// `RelayAdapt.relay(...)`.
+    /// Selects the notes for `intents`, then proves and submits the transaction over the
+    /// selected transport. `relay` is a RelayAdapt action to bind into the spends, legacy and
+    /// direct transports only: the proved transaction is then sent as `RelayAdapt.relay(...)`.
+    /// It is bound after the spends are final (after a broadcaster fee is attached), since the
+    /// adapt params commit to the nullifiers of every input.
     async fn submit(
         &mut self,
         ctx: &JobCtx<'_>,
-        builder: TransactionBuilder,
+        intents: AmountIntents,
         transport: Transport,
         calls: Vec<Call>,
         sender: Option<EoaSigner>,
@@ -1029,12 +1040,13 @@ impl Session {
         if relay.is_some() && transport == Transport::Erc4337 {
             bail!("RelayAdapt actions are for the legacy and direct transports");
         }
-        let builder = if self.fee_limits.hybrid_change {
+        let intents = if self.fee_limits.hybrid_change {
             ctx.step("change notes encrypted with ML-KEM-768 + ECDH, to this wallet's key");
-            builder.with_hybrid_change()
+            intents.with_hybrid_change()
         } else {
-            builder
+            intents
         };
+        let spends = self.railgun.resolve_amounts(intents, &mut rand::rng()).await?;
         let result = match transport {
             Transport::Legacy => {
                 if !calls.is_empty() {
@@ -1043,23 +1055,25 @@ impl Session {
                          (RelayAction), not through a sender account"
                     );
                 }
-                self.submit_legacy(ctx, builder, relay.as_ref()).await?
+                self.submit_legacy(ctx, &spends, relay.as_ref()).await?
             }
             Transport::Direct => {
                 if self.eoa.is_none() {
                     bail!("direct transport needs a public EOA key");
                 }
+                // No fee note here, so the spends are final: bind the action now.
+                let spends = match &relay {
+                    Some(action) => action.bind(spends),
+                    None => spends,
+                };
                 // Exercises the dummy-proof path the legacy transport will use for fee quotes:
                 // same calldata shape, zero proof, estimated from the verification bypass origin.
-                match self
-                    .estimate_with_dummy_proof(builder.clone(), None, relay.as_ref())
-                    .await
-                {
+                match self.estimate_with_dummy_proof(&spends, None, relay.as_ref()).await {
                     Ok(gas) => ctx.step(format!("dummy-proof gas estimate: {gas}")),
                     Err(e) => ctx.step(format!("dummy-proof gas estimate failed (non fatal): {e:#}")),
                 }
-                ctx.step("building and proving (direct transport)");
-                let mut proved = self.railgun.build(builder, &mut rand::rng()).await?;
+                ctx.step("proving (direct transport)");
+                let mut proved = self.railgun.prove(&spends, &mut rand::rng()).await?;
                 if let Some(action) = &relay {
                     action.package(&mut proved);
                 }
@@ -1085,24 +1099,39 @@ impl Session {
                 let railgun_signer = self.signer.clone() as Arc<dyn RailgunSigner>;
                 let fee_token = self.chain.wrapped_base_token;
                 let (mut signable, mode) = if self.fee_limits.single_proof {
-                    let margin_percent = self
-                        .fee_limits
-                        .gas_margin_percent
-                        .unwrap_or(DEFAULT_GAS_MARGIN_PERCENT)
-                        .min(MAX_GAS_MARGIN_PERCENT);
-                    match self
-                        .simulate_gas_limits(ctx, &builder, &bundler, &account, &calls, margin_percent)
+                    // The bundler estimates the dummy-proof operation itself, with the Railgun
+                    // verifier told to accept the dummy proof through a state override: the
+                    // limits are its own figures for the exact operation, nothing is signed.
+                    ctx.step("asking the bundler to estimate the dummy-proof operation");
+                    let estimate = self
+                        .railgun
+                        .simulate_gas_limits(
+                            &spends,
+                            &bundler as &dyn Bundler,
+                            &account,
+                            railgun_signer.clone(),
+                            fee_token,
+                            &calls,
+                            &mut rand::rng(),
+                        )
                         .await
-                    {
+                        .map_err(anyhow::Error::from);
+                    match estimate {
                         Ok(gas) => {
                             ctx.step(format!(
-                                "proving once from ephemeral sender {}",
+                                "limits from the bundler's estimate of the dummy-proof operation: pre-verification {}, account verification {}, call {}, paymaster verification {}, post-op {}, at {} wei/gas; proving once from ephemeral sender {}",
+                                gas.pre_verification_gas,
+                                gas.verification_gas_limit,
+                                gas.call_gas_limit,
+                                gas.paymaster_verification_gas_limit.unwrap_or(0),
+                                gas.paymaster_post_op_gas_limit.unwrap_or(0),
+                                gas.max_fee_per_gas,
                                 sender.address()
                             ));
                             let (signable, report) = self
                                 .railgun
                                 .prepare_userop_single_proof(
-                                    builder,
+                                    &spends,
                                     &bundler as &dyn Bundler,
                                     &account,
                                     railgun_signer,
@@ -1121,18 +1150,19 @@ impl Session {
                         }
                         Err(e) if self.fee_limits.single_proof_strict => {
                             return Err(e.context(
-                                "gas limits could not be simulated and falling back to several \
-                                 signatures is disabled. Nothing was signed",
+                                "the bundler could not estimate the dummy-proof operation and \
+                                 falling back to several signatures is disabled. Nothing was \
+                                 signed",
                             ));
                         }
                         Err(e) => {
                             ctx.step(format!(
-                                "gas limits could not be simulated ({e:#}): falling back to the iterative estimate, which signs several times"
+                                "the bundler could not estimate the dummy-proof operation ({e:#}): falling back to the iterative estimate, which signs several times"
                             ));
                             let signable = self
                                 .railgun
                                 .prepare_userop(
-                                    builder,
+                                    &spends,
                                     &bundler as &dyn Bundler,
                                     &account,
                                     railgun_signer,
@@ -1152,7 +1182,7 @@ impl Session {
                     let signable = self
                         .railgun
                         .prepare_userop(
-                            builder,
+                            &spends,
                             &bundler as &dyn Bundler,
                             &account,
                             railgun_signer,
@@ -1197,7 +1227,7 @@ impl Session {
     async fn submit_legacy(
         &mut self,
         ctx: &JobCtx<'_>,
-        builder: TransactionBuilder,
+        spends: &[Spend],
         relay: Option<&RelayAction>,
     ) -> Result<Value> {
         // Real funds: never pay an uncapped rate. The reference client makes the trusted signer
@@ -1303,13 +1333,6 @@ impl Session {
         // under half the slow market price: take the node's price plus 10%.
         let gas_price = self.provider.get_gas_price().await.context("eth_gasPrice")? * 11 / 10;
 
-        let signer = self.signer.clone() as Arc<dyn RailgunSigner>;
-        let with_fee = |fee: u128| -> Result<TransactionBuilder> {
-            Ok(builder
-                .clone()
-                .broadcaster_fee(signer.clone(), broadcaster_address, fee_asset, fee)?
-                .min_gas_price(gas_price))
-        };
         let fee_for = |gas: u64| {
             token_fee(quote.fee_per_unit_gas, gas, gas_price)
                 .ok_or_else(|| anyhow!("fee overflow"))
@@ -1320,8 +1343,11 @@ impl Session {
         let mut fee = fee_for(FIRST_GUESS_GAS)?;
         let mut gas = 0;
         for round in 1..=2 {
+            let with_fee = self
+                .spends_for_broadcaster(spends, broadcaster_address, fee_asset, fee, gas_price, relay)
+                .await?;
             gas = self
-                .estimate_with_dummy_proof(with_fee(fee)?, Some(gas_price), relay)
+                .estimate_with_dummy_proof(&with_fee, Some(gas_price), relay)
                 .await
                 .with_context(|| format!("dummy-proof gas estimate (round {round})"))?;
             fee = fee_for(gas)?;
@@ -1342,8 +1368,11 @@ impl Session {
             }
         }
 
-        ctx.step("building and proving (legacy transport)");
-        let mut proved = self.railgun.build(with_fee(fee)?, &mut rand::rng()).await?;
+        ctx.step("proving (legacy transport)");
+        let with_fee = self
+            .spends_for_broadcaster(spends, broadcaster_address, fee_asset, fee, gas_price, relay)
+            .await?;
+        let mut proved = self.railgun.prove(&with_fee, &mut rand::rng()).await?;
         if let Some(action) = relay {
             action.package(&mut proved);
         }
@@ -1476,164 +1505,45 @@ impl Session {
         }
     }
 
-    /// Gas limits of the UserOperation, measured before any proof or signature.
-    ///
-    /// A dummy-proof UserOperation is run through `userop_kit::validation_probe`: an `eth_call`
-    /// from the Railgun verification bypass origin, with the probe's code overriding the
-    /// EntryPoint, executes account validation, paymaster validation (which performs the
-    /// `transact`), the tail calls and `postOp`, and reports the gas of each. Two rounds, since
-    /// the fee is an output note and can change the inputs selected. Only `preVerificationGas`
-    /// is computed, by the reference formula: it prices inclusion, not execution, and gets twice
-    /// the margin because the bundler has the last word on it.
-    async fn simulate_gas_limits(
+    /// The spends as the broadcaster will relay them: the fee note attached (first commitment
+    /// of the first operation, the only one broadcasters look at), `minGasPrice` on every spend
+    /// since the contract checks it per transaction, and the relay action bound last, so that
+    /// the adapt params commit to the nullifiers of the fee spend too.
+    async fn spends_for_broadcaster(
         &mut self,
-        ctx: &JobCtx<'_>,
-        builder: &TransactionBuilder,
-        bundler: &PimlicoBundler,
-        account: &SimpleSmartAccount,
-        calls: &Vec<Call>,
-        margin_percent: u32,
-    ) -> Result<UserOperationGasEstimate> {
-        use alloy::rpc::types::state::{AccountOverride, StateOverride};
-        use userop_kit::validation_probe::{self as probe, alto::AltoPolicy, pad_gas};
-
-        let price = (bundler as &dyn Bundler)
-            .gas_price()
-            .await
-            .context("asking the bundler for its gas price")?
-            .ok_or_else(|| anyhow!("the bundler gives no gas price outside of a simulation"))?;
-        let railgun_signer = self.signer.clone() as Arc<dyn RailgunSigner>;
-        let fee_token = self.chain.wrapped_base_token;
-
-        // The probe does not enforce limits: they only enter through `maxCost`, against which
-        // the paymaster checks the fee. Each round therefore pays exactly its own limits, as the
-        // real UserOperation will. Round one starts from plausible figures so that this fee is
-        // affordable; round two uses what round one measured.
-        let mut gas = UserOperationGasEstimate {
-            pre_verification_gas: 150_000,
-            verification_gas_limit: 100_000,
-            call_gas_limit: if calls.is_empty() { 20_000 } else { 150_000 },
-            paymaster_verification_gas_limit: Some(1_200_000),
-            paymaster_post_op_gas_limit: Some(50_000),
-            max_fee_per_gas: price.max_fee_per_gas,
-            max_priority_fee_per_gas: price.max_priority_fee_per_gas,
-        };
-        let total_of = |g: &UserOperationGasEstimate| {
-            g.pre_verification_gas
-                + g.verification_gas_limit
-                + g.call_gas_limit
-                + g.paymaster_verification_gas_limit.unwrap_or(0)
-                + g.paymaster_post_op_gas_limit.unwrap_or(0)
-        };
-        let mut measured = None;
-        for _round in 1..=2 {
-            let fee = total_of(&gas) * price.max_fee_per_gas;
-            let dummy = self
-                .railgun
-                .dummy_userop(
-                    builder.clone(),
-                    account,
-                    railgun_signer.clone(),
-                    fee_token,
-                    calls,
-                    fee,
-                    gas,
-                    &mut rand::rng(),
-                )
-                .await?;
-            let max_cost = U256::from(dummy.total_gas_limit()) * U256::from(price.max_fee_per_gas);
-            let request = probe::request(&dummy, max_cost);
-
-            let mut overrides = StateOverride::default();
-            for (address, code) in &request.code_overrides {
-                overrides.insert(*address, AccountOverride::default().with_code(code.clone()));
-            }
-            if let Some((from, to)) = request.copy_code_from {
-                // The 7702 delegation of the fresh sender is not on-chain yet: give it the code
-                // it will delegate to.
-                let code = self
-                    .provider
-                    .get_code_at(from)
-                    .await
-                    .context("reading the account implementation code")?;
-                overrides.insert(to, AccountOverride::default().with_code(code));
-            }
-            overrides.insert(
-                railgun::provider::VERIFICATION_BYPASS,
-                AccountOverride::default().with_balance(U256::from(10u128.pow(24))),
-            );
-
-            let call = alloy::rpc::types::TransactionRequest::default()
-                .from(railgun::provider::VERIFICATION_BYPASS)
-                .to(request.to)
-                .input(request.data.clone().into())
-                .gas_limit(25_000_000);
-            let answer = self
-                .provider
-                .call(call)
-                .overrides(overrides)
-                .await
-                .context("eth_call with state overrides (does this RPC support them?)")?;
-
-            let phases = probe::decode(&answer, !calls.is_empty())?;
-
-            // The bundler prices paymaster data and signature as all non-zero bytes: take its
-            // way of counting, which is the higher one, and the usual margin.
-            let pre_verification =
-                probe::pre_verification_gas(&dummy).max(probe::alto::pre_verification_gas(&dummy));
-            gas.pre_verification_gas = pad_gas(pre_verification, margin_percent, GAS_BUCKET);
-            // The EntryPoint charges its own pre-validation work to this limit (AA26), which the
-            // probe cannot see: see `ENTRY_POINT_VALIDATION_OVERHEAD`.
-            gas.verification_gas_limit = pad_gas(
-                phases.account_validation + probe::ENTRY_POINT_VALIDATION_OVERHEAD,
-                margin_percent,
-                GAS_BUCKET,
-            );
-            // Execution calls. The probe's search gives the smallest limit that works on-chain;
-            // the bundler will ask for more, by a rule read in its source and reproduced in
-            // `validation_probe::alto`: its own search ladder, then a multiplier (25.3k needed
-            // gives 68,136, to the unit). Size the limit from that prediction, with half the
-            // margin on top in case the deployment's multiplier moves a little. This is the one
-            // limit whose shortfall would strand funds on the ephemeral sender.
-            gas.call_gas_limit = if calls.is_empty() {
-                30_000
-            } else {
-                pad_gas(
-                    AltoPolicy::PIMLICO_PUBLIC.call_gas_limit(phases.call_limit),
-                    margin_percent / 2,
-                    GAS_BUCKET,
-                )
-            };
-            gas.paymaster_verification_gas_limit =
-                Some(pad_gas(phases.paymaster_validation, margin_percent, GAS_BUCKET));
-            gas.paymaster_post_op_gas_limit = Some(if phases.post_op_called {
-                pad_gas(phases.post_op, margin_percent, GAS_BUCKET).max(10_000)
-            } else {
-                10_000
-            });
-            let total = total_of(&gas);
-            measured = Some((phases, pre_verification, total));
-        }
-
-        let (phases, pre_verification, total) = measured.expect("two rounds ran");
-        ctx.step(format!(
-            "simulated before signing: account {}, paymaster {}, calls {} used / {} minimal limit, post-op {}, pre-verification {} (bundler's formula); limits with {margin_percent}% margin total {total} gas",
-            phases.account_validation, phases.paymaster_validation, phases.call, phases.call_limit, phases.post_op, pre_verification
-        ));
-        Ok(gas)
+        spends: &[Spend],
+        broadcaster: RailgunAddress,
+        fee_asset: AssetId,
+        fee: u128,
+        gas_price: u128,
+        relay: Option<&RelayAction>,
+    ) -> Result<Vec<Spend>> {
+        let signer = self.signer.clone() as Arc<dyn RailgunSigner>;
+        let with_fee: Vec<Spend> = self
+            .railgun
+            .attach_broadcaster_fee(spends, signer, broadcaster, fee_asset, fee, &mut rand::rng())
+            .await?
+            .into_iter()
+            .map(|spend| spend.min_gas_price(gas_price))
+            .collect();
+        Ok(match relay {
+            Some(action) => action.bind(with_fee),
+            None => with_fee,
+        })
     }
 
-    /// `gas_price` must be the `minGasPrice` bound in the builder, if any: the Railgun contract
+    /// `gas_price` must be the `minGasPrice` bound in the spends, if any: the Railgun contract
     /// compares it to `tx.gasprice`, which is 0 in an estimate that names no price, and reverts
     /// with "Gas price too low". The estimate then runs as the legacy (type 0) transaction the
-    /// broadcaster will send.
+    /// broadcaster will send. `relay` must already be bound into `spends`; it is only used to
+    /// package the dummy transaction as the `RelayAdapt.relay` call.
     async fn estimate_with_dummy_proof(
         &mut self,
-        builder: TransactionBuilder,
+        spends: &[Spend],
         gas_price: Option<u128>,
         relay: Option<&RelayAction>,
     ) -> Result<u64> {
-        let mut dummy = self.railgun.build_dummy(builder, &mut rand::rng()).await?;
+        let mut dummy = self.railgun.prove_dummy(spends, &mut rand::rng()).await?;
         if let Some(action) = relay {
             action.package(&mut dummy);
         }
@@ -1674,6 +1584,16 @@ impl Session {
             warn!("post-transaction sync failed (run a manual sync): {e}");
             ctx.step(format!("post-transaction sync failed: {e}"));
         }
+        // The proof's pending POI entries and the new notes are on disk before the job ends.
+        if let Err(e) = self.persist() {
+            warn!("saving the wallet state failed: {e:#}");
+            ctx.step(format!("saving the wallet state failed: {e:#}"));
+        }
+    }
+
+    /// Writes a snapshot of the SDK state to `data_dir`, see `db`.
+    fn persist(&self) -> Result<()> {
+        db::save(&self.data_dir, &self.state)
     }
 
     async fn snapshot(&mut self) -> StatusSnapshot {

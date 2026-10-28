@@ -25,34 +25,34 @@ A Railgun wallet written in Rust, by ZKNOX, built on the [Kohaku](https://github
 | `railgun-broadcaster` | Client for the Railgun community broadcaster network |
 | `waku-light` | Waku light client (filter, light push) on rust-libp2p, used by the broadcaster client |
 | `railgun-chains` | Railgun V2 deployments beyond the SDK's mainnet and Sepolia (BNB Chain, Polygon, Arbitrum) |
-| `kv-store-js` | Browser storage (IndexedDB) backend for the SDK's key-value store |
+| `kv-store-js` | Browser storage (IndexedDB) for the state the web wallets persist |
 
 Each app crate has its own README with details.
 
 ## The Kohaku SDK
 
 The Railgun protocol code (notes, Merkle trees, proving, POI, 4337 user operations) comes from
-[kohaku-rs](https://github.com/ethereum/kohaku-rs), branch `zknox/dev` of the ZKNOX fork. That
-branch is upstream's `feat/kohaku-railgun` plus the fixes and features this wallet needs, which
-are being proposed upstream as separate PRs.
+[kohaku-rs](https://github.com/ethereum/kohaku-rs), through the ZKNOX fork. Its branch
+`zknox/dev` is upstream's `feat/kohaku-railgun` plus the fixes and features this wallet needs,
+which are being proposed upstream as separate PRs; `zknox/dev-pq` adds the post-quantum note
+encryption on top, while that work is on its own branch. `Cargo.toml` names the branch.
 
-The SDK is a **git dependency** on [ZKNoxHQ/kohaku-rs](https://github.com/ZKNoxHQ/kohaku-rs),
-branch `zknox/dev`: Cargo fetches it, nothing to clone. `Cargo.lock` pins the commit, so
-everyone builds the same SDK. To move to the head of the branch:
+The SDK is a **git dependency** on [ZKNoxHQ/kohaku-rs](https://github.com/ZKNoxHQ/kohaku-rs):
+Cargo fetches it, nothing to clone. `Cargo.lock` pins the commit, so everyone builds the same
+SDK. To move to the head of the branch:
 
 ```sh
-cargo update -p kohaku-railgun
+cargo update -p kohaku-railgun -p kohaku-crypto -p kohaku-eip-1193 -p kohaku-userop-kit
 ```
 
 To work on the SDK and the wallet together, point the build at a local checkout with a
 `[patch]` that is not committed, for instance in `~/.cargo/config.toml` (absolute paths). Patch
-all six crates, so none is built twice:
+all the crates, so none is built twice:
 
 ```toml
 [patch."https://github.com/ZKNoxHQ/kohaku-rs"]
 kohaku-crypto = { path = "/path/to/kohaku-rs/crates/crypto" }
 kohaku-eip-1193 = { path = "/path/to/kohaku-rs/crates/eip-1193" }
-kohaku-kv-store = { path = "/path/to/kohaku-rs/crates/kv-store" }
 kohaku-railgun = { path = "/path/to/kohaku-rs/crates/railgun" }
 kohaku-userop-kit = { path = "/path/to/kohaku-rs/crates/userop-kit" }
 poseidon-rust = { path = "/path/to/kohaku-rs/crates/poseidon-rust" }
@@ -120,5 +120,7 @@ The Ledger signer is tested against a software model of the device app
 - **POI node reachability:** the POI node (`ppoi.fdi.network`) resets connections over IPv6.
   The wallets go through a same-origin `/poi` relay (`serve.py` locally, `_redirects` on
   Netlify), so IPv6-only clients still reach it.
-- **Local data:** the daemon stores the SDK state in `<data-dir>/<chain>/<id>/db-v3.redb`, the
-  static sites in IndexedDB. Both are caches: deleting them only costs a resync.
+- **Local data:** the SDK keeps its state in memory and the apps save a snapshot of it after
+  every operation: the daemon and the viewer in `<data-dir>/<chain>/<id>/railgun-state.bin`
+  (written atomically, directory mode 0700), the static sites in IndexedDB. The snapshot holds
+  decrypted notes, so it is wallet data, but it is also only a cache: deleting it costs a resync.

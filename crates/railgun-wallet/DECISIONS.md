@@ -337,3 +337,40 @@ against the fleet), then Android. Dr Rail comes last and only when its own work 
 point, because it uses the wallet as a library (`railgun_wallet::db`, `keys`), which exists only
 since the Android split, and because its SDK additions must follow the signer API of the Ledger
 work (`spending_public_key`, async `sign`): hardware signers are the harder constraint.
+
+## ADR-034: the bundler estimates the dummy-proof operation, under a verifier state override
+
+Supersedes ADR-017, 018, 020, 021 and 022, now that the SDK does it (kohaku-rs,
+`transact/verifier_override.rs`). The obstacle those records worked around was the origin: the
+Railgun verifier only accepts a dummy proof from its bypass address, and a bundler simulates
+with its own. The other way to make a dummy proof pass is to change what the verifier checks:
+a state override on `eth_estimateUserOperationGas` zeroes the three G2 points of the verifying
+keys of the circuits used, so every pairing factor is the identity and `verify` returns true,
+at the gas cost of a real verification. The bundler then runs its own simulation on the exact
+operation, with the real EntryPoint, and the limits are its own figures.
+
+What this removes from the wallet: the probe contract and its decoding, the reference formula
+for `preVerificationGas`, the EntryPoint overhead constant, the search for the call limit, the
+prediction of alto's ladder and multipliers, and the margin option. Nothing is predicted any
+more, so there is no margin to pay and no bundler policy to track; the post-proof comparison
+with the bundler's estimate stays as the safety net it always was.
+
+Dependency: a bundler that honours state overrides in `eth_estimateUserOperationGas` (alto
+does, hence Pimlico). Without it the wallet falls back to the iterative path, or stops in strict
+mode, as before. The fee is still public in `paymasterData`; limits taken verbatim from the
+bundler are what every alto client gets, so they no longer single out this wallet.
+
+## ADR-035: the SDK state is a snapshot file, not a database
+
+Supersedes ADR-007. The SDK no longer takes a database: it keeps its state in memory
+(`RailgunState`) and the application exports a snapshot after each operation. The wallet
+writes it with `postcard` to `<data-dir>/<chain>/<tag>/railgun-state.bin`, through a temporary
+file, fsync and rename, so a crash mid-save leaves the previous checkpoint. The SDK publishes
+each validated batch atomically, so any snapshot is consistent; it is taken after every engine
+command, whatever the outcome, since a failed command may still have synced or queued POI work.
+
+Cost: the whole state is rewritten each time, tens of megabytes with the POI list copies. A
+sync is the only frequent writer and takes seconds anyway. Writing only the changed entries
+would need the snapshot's entries to be addressable, which they are not meant to be; revisit if
+saves become visible. The web wallets store the same bytes under one IndexedDB key. The old
+`db-v3.redb` files are left in place and never read.

@@ -20,6 +20,7 @@ crypto = { workspace = true }
 base64 = "0.22"
 axum = { version = "0.8", default-features = false, features = ["http1", "json", "tokio", "query"] }
 hex = { workspace = true }
+postcard = { workspace = true }
 railgun = { workspace = true }
 railgun-chains = { workspace = true }
 railgun-broadcaster = { path = "../railgun-broadcaster", features = ["light-node"] }

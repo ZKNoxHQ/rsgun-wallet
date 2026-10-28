@@ -1,16 +1,21 @@
 //! Session core shared by the native daemon (`engine.rs`) and the web build
 //! (`railgun-viewer-web`): unlock parameters, signer resolution, the per-account session and the
 //! history snapshot. No thread, no file, no clock of its own: persistence goes through
-//! [`CacheStore`], progress and log lines through [`SharedRef`].
+//! [`Store`], progress and log lines through [`SharedRef`].
 
-use std::{collections::HashMap, sync::Arc};
+use std::{
+    collections::{HashMap, hash_map::Entry},
+    sync::Arc,
+};
 
 use alloy::{
     primitives::{Address, U256},
     providers::{DynProvider, Provider},
 };
-use anyhow::{Result, anyhow, bail};
+use anyhow::{Context, Result, anyhow, bail};
+use async_trait::async_trait;
 use railgun::{
+    RailgunSnapshot, RailgunState,
     account::{
         address::RailgunAddress,
         signer::{PrivateKeySigner as RgSigner, RailgunSigner},
@@ -182,8 +187,10 @@ fn fmt_duration(ms: u64) -> String {
 }
 
 /// Sync with progress: the range from the last synced block to the head is synced in steps
-/// (about 25, at least 20 000 blocks each), each step persisted by the SDK, with percentage,
-/// block and estimated time left in the status line. A short range is a single step.
+/// (about 25, at least 20 000 blocks each), the SDK state saved after each step so that an
+/// interrupted sync resumes where it stopped, with percentage, block and estimated time left in
+/// the status line. A short range is a single step. The caller saves the state once more at the
+/// end and reports a save failure; here a failed save is only logged, the next one retries.
 pub async fn sync_with_progress(session: &mut Session, shared: &SharedRef) -> Result<()> {
     let head = session.provider.get_block_number().await.map_err(|e| anyhow!("eth_blockNumber: {e}"))?;
     let start = session.railgun.synced_block().max(session.chain.deployment_block.saturating_sub(1));
@@ -213,6 +220,9 @@ pub async fn sync_with_progress(session: &mut Session, shared: &SharedRef) -> Re
     while target < head {
         target = (target + step).min(head);
         session.railgun.sync_to_without_poi_submission(target).await.map_err(|e| anyhow!("{e:#}"))?;
+        if let Err(e) = session.persist_state().await {
+            tracing::warn!("Railgun state not saved after this step: {e:#}");
+        }
         progress(shared, session.railgun.synced_block());
     }
     // blocks mined while syncing
@@ -244,15 +254,44 @@ pub async fn warn_if_poi_unreachable(chain_id: u64, endpoint: &str, shared: &Sha
     }
 }
 
-/// Where the viewer cache (chain references, POI statuses, operations) is persisted: a JSON file
-/// next to the database on the daemon, IndexedDB in the web build.
-pub trait CacheStore {
-    fn save(&self, value: Value);
+/// Where the account's data is persisted: files in the account's directory on the daemon,
+/// IndexedDB in the web build. Two documents: the SDK state (trees, sync cursors, decrypted
+/// notes, POI statuses), which the SDK keeps in memory and the viewer saves as a snapshot after
+/// every operation that can change it, and the viewer cache (chain references, POI statuses,
+/// operations), which is only a cache.
+///
+/// Both builds are single-threaded for the session (one engine thread, one worker), so the
+/// futures need not be `Send`.
+#[async_trait(?Send)]
+pub trait Store {
+    /// Saves the viewer cache. Best effort: the next refresh rewrites it.
+    fn save_cache(&self, value: Value);
+    /// Saves the serialized SDK state, replacing the previous one atomically: a crash during the
+    /// save must leave the previous snapshot in place rather than a truncated one.
+    async fn save_state(&self, bytes: Vec<u8>) -> Result<()>;
+}
+
+/// Key of the SDK state in the web build's IndexedDB, and stem of the daemon's file name.
+#[allow(dead_code, reason = "the IndexedDB key of the web build; the native build names a file")]
+pub const STATE_KEY: &str = "railgun-state";
+
+/// The SDK state as saved: a postcard-encoded [`RailgunSnapshot`]. Postcard is compact and
+/// keeps the snapshot's binary keys and values as bytes, where JSON would expand them to arrays
+/// of numbers.
+pub fn state_bytes(state: &RailgunState) -> Result<Vec<u8>> {
+    let snapshot = state.snapshot().context("exporting the Railgun state")?;
+    postcard::to_allocvec(&snapshot).context("encoding the Railgun state")
+}
+
+/// The state saved by [`state_bytes`], restored as an independent in-memory state.
+pub fn state_from_bytes(bytes: &[u8]) -> Result<RailgunState> {
+    let snapshot: RailgunSnapshot = postcard::from_bytes(bytes).context("decoding the Railgun state")?;
+    RailgunState::from_snapshot(snapshot).context("restoring the Railgun state")
 }
 
 pub type PoiCache = HashMap<String, std::collections::BTreeMap<String, String>>;
 
-/// Viewer cache, kept outside the SDK database.
+/// Viewer cache, kept outside the SDK state.
 #[derive(Default)]
 pub struct Caches {
     pub commitment_refs: HashMap<String, ChainRef>,
@@ -281,10 +320,13 @@ pub struct Session {
     pub chain: ChainConfig,
     pub provider: DynProvider,
     pub railgun: RailgunProvider,
+    /// The provider's in-memory state (a clone of the handle given to the builder): what
+    /// [`Session::persist_state`] exports.
+    pub state: RailgunState,
     pub signer: Arc<dyn RailgunSigner>,
     pub address: RailgunAddress,
     pub mode: &'static str,
-    pub store: Box<dyn CacheStore>,
+    pub store: Box<dyn Store>,
     pub squid: Squid,
     pub tokens: HashMap<String, TokenMeta>,
     pub commitment_refs: HashMap<String, ChainRef>,
@@ -304,9 +346,10 @@ impl Session {
         chain: ChainConfig,
         provider: DynProvider,
         railgun: RailgunProvider,
+        state: RailgunState,
         signer: Arc<dyn RailgunSigner>,
         mode: &'static str,
-        store: Box<dyn CacheStore>,
+        store: Box<dyn Store>,
         caches: Caches,
     ) -> Self {
         let address = signer.address();
@@ -315,6 +358,7 @@ impl Session {
             chain,
             provider,
             railgun,
+            state,
             signer,
             address,
             mode,
@@ -339,8 +383,22 @@ impl Session {
         })
     }
 
-    pub fn persist(&self) {
-        self.store.save(self.cache_value());
+    /// Saves the viewer cache, and the SDK state with it: the cache is written after a refresh,
+    /// which follows every operation that can change the state. A failed state save is only
+    /// logged here; the engines report the one they do after a sync.
+    pub async fn persist(&self) {
+        self.store.save_cache(self.cache_value());
+        if let Err(e) = self.persist_state().await {
+            tracing::warn!("Railgun state not saved: {e:#}");
+        }
+    }
+
+    /// Exports the SDK state and hands it to the store. The in-memory state is ahead of the saved
+    /// one until the next successful save; the SDK replays nothing, so what was not saved is
+    /// synced again at the next unlock.
+    pub async fn persist_state(&self) -> Result<()> {
+        let bytes = state_bytes(&self.state)?;
+        self.store.save_state(bytes).await.context("saving the Railgun state")
     }
 }
 
@@ -364,7 +422,7 @@ pub fn note_in(n: &UtxoNote, spent: bool) -> NoteIn {
         token,
         token_hash: hex64(n.asset.hash()),
         memo: n.memo.clone(),
-        commitment_type: serde_json::to_value(&n.commitment_type)
+        commitment_type: serde_json::to_value(n.commitment_type)
             .ok()
             .and_then(|v| v.as_str().map(str::to_owned))
             .unwrap_or_else(|| format!("{:?}", n.commitment_type)),
@@ -562,11 +620,11 @@ pub async fn build_history(session: &mut Session) -> Result<history::History> {
     wanted.sort();
     wanted.dedup();
     for t in wanted {
-        if !session.tokens.contains_key(&t) {
-            if let Ok(addr) = t.parse::<Address>() {
-                let meta = chain::token_meta(&session.provider, addr).await;
-                session.tokens.insert(t.clone(), meta);
-            }
+        if !session.tokens.contains_key(&t)
+            && let Ok(addr) = t.parse::<Address>()
+        {
+            let meta = chain::token_meta(&session.provider, addr).await;
+            session.tokens.insert(t.clone(), meta);
         }
     }
 
@@ -623,7 +681,7 @@ pub async fn build_history(session: &mut Session) -> Result<history::History> {
         }
     }
 
-    // Chain references (subsquid), cached on disk.
+    // Chain references (subsquid), kept in the viewer cache.
     let mut missing: Vec<String> = notes
         .iter()
         .map(|n| n.hash.clone())
@@ -650,7 +708,7 @@ pub async fn build_history(session: &mut Session) -> Result<history::History> {
             session.nullifier_refs.entry(k).or_insert(v);
         }
     }
-    session.persist();
+    session.persist().await;
 
     let mut un_blocks: Vec<u64> = ops.iter().filter(|op| op.has_unshield).map(|op| op.block_number).collect();
     un_blocks.sort_unstable();
@@ -681,15 +739,13 @@ pub async fn build_history(session: &mut Session) -> Result<history::History> {
     }
     let mut token_meta = session.tokens.clone();
     for u in &unshields {
-        if let Some(t) = &u.token_address {
-            let t = t.to_ascii_lowercase();
-            if !token_meta.contains_key(&t) {
-                if let Ok(addr) = t.parse::<Address>() {
-                    let meta = chain::token_meta(&session.provider, addr).await;
-                    session.tokens.insert(t.clone(), meta.clone());
-                    token_meta.insert(t, meta);
-                }
-            }
+        if let Some(t) = &u.token_address
+            && let Entry::Vacant(e) = token_meta.entry(t.to_ascii_lowercase())
+            && let Ok(addr) = e.key().parse::<Address>()
+        {
+            let meta = chain::token_meta(&session.provider, addr).await;
+            session.tokens.insert(e.key().clone(), meta.clone());
+            e.insert(meta);
         }
     }
 
@@ -755,6 +811,18 @@ pub async fn build_history(session: &mut Session) -> Result<history::History> {
     Ok(h)
 }
 
+/// Railgun txid (`0x` + 64 hex digits) of an operation read from an indexer (subsquid
+/// `Transaction`), for operations the txid indexer did not retain.
+fn railgun_txid_hex(
+    nullifiers: &[ruint::aliases::U256],
+    commitments: &[ruint::aliases::U256],
+    bound_params_hash: ruint::aliases::U256,
+) -> String {
+    let txid: ruint::aliases::U256 =
+        railgun::crypto::railgun_txid::Txid::new(nullifiers, commitments, bound_params_hash).into();
+    format!("0x{txid:064x}")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -775,16 +843,20 @@ mod tests {
         assert_eq!(fmt_duration(185_000), "3 min 05 s");
         assert_eq!(fmt_duration(3_900_000), "1 h 05 min");
     }
-}
 
-/// Railgun txid (`0x` + 64 hex digits) of an operation read from an indexer (subsquid
-/// `Transaction`), for operations the txid indexer did not retain.
-fn railgun_txid_hex(
-    nullifiers: &[ruint::aliases::U256],
-    commitments: &[ruint::aliases::U256],
-    bound_params_hash: ruint::aliases::U256,
-) -> String {
-    let txid: ruint::aliases::U256 =
-        railgun::crypto::railgun_txid::Txid::new(nullifiers, commitments, bound_params_hash).into();
-    format!("0x{txid:064x}")
+    #[test]
+    fn state_round_trips_through_postcard() {
+        let state = RailgunState::default();
+        let bytes = state_bytes(&state).unwrap();
+        let restored = state_from_bytes(&bytes).unwrap();
+        assert_eq!(state_bytes(&restored).unwrap(), bytes);
+    }
+
+    #[test]
+    fn corrupt_state_is_refused() {
+        let Err(err) = state_from_bytes(&[0xff; 7]) else {
+            panic!("garbage decoded as a Railgun state");
+        };
+        assert!(err.to_string().contains("Railgun state"), "{err:#}");
+    }
 }

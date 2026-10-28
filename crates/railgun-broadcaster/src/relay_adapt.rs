@@ -8,8 +8,8 @@
 //! submitter (a broadcaster) can neither change the recipient nor drop a call. This mirrors
 //! `RelayAdaptHelper.getRelayAdaptParams` of the Railgun community engine.
 //!
-//! The SDK only provides the generic hook ([`TransactionBuilder::adapt_with`]); the ERC-4337
-//! transport does not need any of this, the smart account unwraps in its execution phase.
+//! The SDK only provides the generic hook ([`Spend::adapt`]); the ERC-4337 transport does not
+//! need any of this, the smart account unwraps in its execution phase.
 
 use alloy::{
     primitives::{Address, B256, Bytes, FixedBytes, U256, keccak256},
@@ -17,7 +17,7 @@ use alloy::{
     sol_types::{SolCall, SolValue},
 };
 use eip_1193_provider::tx_data::TxData;
-use railgun::transact::{ProvedTx, TransactionBuilder};
+use railgun::transact::{ProvedTx, Spend};
 use rand::CryptoRng;
 
 sol! {
@@ -144,11 +144,19 @@ impl RelayAction {
         keccak256(preimage).0
     }
 
-    /// Binds this action into `builder`: RelayAdapt as adapt contract, and the adapt params
-    /// derived from the nullifiers of the operations once they are built.
-    pub fn bind(&self, builder: TransactionBuilder) -> TransactionBuilder {
-        let action = self.clone();
-        builder.adapt_with(self.relay_adapt, move |nullifiers| action.adapt_params(nullifiers))
+    /// Binds this action into `spends`: RelayAdapt as adapt contract, and the adapt params
+    /// derived from the nullifiers of their inputs, in transaction order. The inputs of a spend
+    /// are fixed, so the params bound here are exactly what RelayAdapt recomputes on-chain.
+    pub fn bind(&self, spends: Vec<Spend>) -> Vec<Spend> {
+        let nullifiers: Vec<Vec<B256>> = spends
+            .iter()
+            .map(|spend| spend.inputs().iter().map(|note| note.nullifier.into()).collect())
+            .collect();
+        let params = self.adapt_params(&nullifiers);
+        spends
+            .into_iter()
+            .map(|spend| spend.adapt(self.relay_adapt, params))
+            .collect()
     }
 
     /// Calldata of `RelayAdapt.relay(transactions, actionData)`.
@@ -158,7 +166,7 @@ impl RelayAction {
         data.into()
     }
 
-    /// Turns a transaction built from a [`Self::bind`]-ed builder into the call to
+    /// Turns a transaction proved from [`Self::bind`]-ed spends into the call to
     /// `RelayAdapt.relay` that carries it.
     pub fn package(&self, proved: &mut ProvedTx) {
         let transactions = proved

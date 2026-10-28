@@ -1,6 +1,9 @@
 // IndexedDB storage for the web build, imported by the wasm module (wasm-bindgen snippet).
 // One IndexedDB database per account and chain ("drrail-<chain>-<tag>"), one object store "kv":
-// the SDK's keys (hex strings) and the viewer cache under CACHE_KEY. Values are strings.
+// the SDK state snapshot under "railgun-state" (a Uint8Array, stored as is: IndexedDB keeps
+// typed arrays through structured cloning, nothing here turns values into strings) and the
+// viewer cache under CACHE_KEY (a JSON string). Databases written by earlier versions also hold
+// the SDK's old per-key entries (hex strings), which are no longer read.
 
 const CACHE_KEY = "__viewer_cache__";
 const handles = new Map();
@@ -30,7 +33,7 @@ async function run(name, mode, op) {
   });
 }
 
-// `kohaku_db::js::JsDatabase` interface.
+// `kv_store_js::JsDatabase` interface (crates/kv-store-js): get returns the stored value or null.
 export function openDb(name) {
   return {
     async get(key) {

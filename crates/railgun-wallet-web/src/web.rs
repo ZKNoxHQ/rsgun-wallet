@@ -2,7 +2,8 @@
 //! `railgun-wallet/src/ipc.rs`, so `railgun-wallet/static/index.html` runs unchanged.
 //!
 //! One actor task drives the `RailgunProvider` (commands run in order, as on the daemon's engine
-//! thread); GET endpoints read the shared snapshot without waiting. The SDK database is IndexedDB.
+//! thread); GET endpoints read the shared snapshot without waiting. The SDK keeps its state in
+//! memory; the actor saves a snapshot of it to IndexedDB after every command (see `save_state`).
 //!
 //! Stage 2a: `/api/unlock` (mnemonic or raw keys), `/api/op` `sync`, the job/step model and the
 //! status snapshot with balances. Ledger unlock needs a main-thread APDU bridge (stage 2b);
@@ -24,9 +25,9 @@ use futures::{
     StreamExt,
     channel::{mpsc, oneshot},
 };
-use kohaku_kv_store::Store;
 use kv_store_js::JsKvStore;
 use railgun::{
+    RailgunSnapshot, RailgunState,
     account::{
         address::{PqRailgunAddress, RailgunAddress},
         chain::ChainId as RgChainId,
@@ -36,7 +37,7 @@ use railgun::{
     caip::AssetId,
     chain_config::ChainConfig,
     provider::{RailgunProvider, RailgunProviderError},
-    transact::{NoteEncryption, TransactionBuilder},
+    transact::{AmountIntents, NoteEncryption, Spend},
 };
 use railgun_broadcaster::{
     BroadcastRequest, BroadcasterClient, ClientError, FeeQuote, NoQuote, NwakuRest, WakuTransport,
@@ -47,6 +48,7 @@ use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use userop_kit::{
     bundler::{Bundler, pimlico::PimlicoBundler},
+    signable_user_operation::SignableUserOperation,
     smart_account::simple_smart_account::{Call, SimpleSmartAccount},
 };
 use wasm_bindgen::{JsCast, JsValue, prelude::wasm_bindgen};
@@ -127,7 +129,8 @@ enum Transport {
     Direct,
 }
 
-/// Fee limits, exactly the daemon's `engine::FeeLimits` shape.
+/// Fee limits, exactly the daemon's `engine::FeeLimits` shape. Fields the page still sends from
+/// earlier versions (`gasMarginPercent`) are ignored: serde skips unknown fields here.
 #[derive(Deserialize, Default, Clone)]
 #[serde(rename_all = "camelCase")]
 struct FeeLimits {
@@ -135,16 +138,12 @@ struct FeeLimits {
     max_fee: Option<String>,
     #[serde(default)]
     single_proof: bool,
-    gas_margin_percent: Option<u32>,
     #[serde(default)]
     hybrid_change: bool,
     broadcaster: Option<String>,
     #[serde(default)]
     single_proof_strict: bool,
 }
-
-const DEFAULT_GAS_MARGIN_PERCENT: u32 = 25;
-const MAX_GAS_MARGIN_PERCENT: u32 = 200;
 
 #[derive(Deserialize)]
 #[serde(tag = "op", rename_all = "lowercase")]
@@ -208,8 +207,11 @@ struct Session {
     ledger_usb: bool,
     /// Account index of a Ledger signer, whose cached keys "Empty cache" also forgets.
     ledger_index: Option<u32>,
-    /// The wallet's IndexedDB database, also holding the Ledger Ethereum address once read.
-    db: Store,
+    /// The wallet's IndexedDB database, where the SDK state snapshot is saved.
+    db: JsKvStore,
+    /// The SDK's in-memory state, the same handle `railgun` writes to: `snapshot()` reads a
+    /// consistent copy of it for `save_state`.
+    state: RailgunState,
     eoa_source: Option<String>,
     signer: Arc<dyn RailgunSigner>,
     railgun: RailgunProvider,
@@ -225,21 +227,9 @@ struct Session {
     silent_broadcasters: Vec<(String, web_time::Instant)>,
     /// Cleared on lock/re-unlock so the fee-monitor task of this session stops.
     monitor_alive: Arc<std::sync::atomic::AtomicBool>,
-    /// Gas limits the bundler asked for after a single proof, kept for the session so the next
-    /// operation fixes them before proving (one signature). See `prove_once_learning`.
-    learned_gas: LearnedGas,
     /// Transaction that created each note, by (tree, leaf). A position never changes owner, so
     /// each is looked up once. See `resolve_note_txs`.
     note_tx: HashMap<(u32, u32), String>,
-}
-
-/// Floors learned from the bundler's post-proof estimates, per gas field.
-#[derive(Default, Clone, Copy)]
-struct LearnedGas {
-    pre_verification: u128,
-    verification: u128,
-    call: u128,
-    paymaster_verification: u128,
 }
 
 impl Drop for Session {
@@ -323,8 +313,9 @@ pub fn start() {
                 continue;
             };
             // A sync can run for long (the first copy of a POI list): a lock stops it, as a
-            // reload would. The SDK saves in atomic steps, so the next unlock resumes from the
-            // last one. Transactions are never interrupted: a lock waits for them.
+            // reload would. The SDK publishes its state in atomic batches and the lock saves a
+            // snapshot before dropping the session, so the next unlock resumes from the last
+            // batch. Transactions are never interrupted: a lock waits for them.
             let mut lock = None;
             {
                 let job = futures::FutureExt::fuse(actor.handle(Command::Job { id, op: Op::Sync }));
@@ -394,6 +385,14 @@ impl Actor {
                     jobs.update(id, |job| job.state = JobState::Running);
                 }
                 let result = self.run_op(id, op).await;
+                // Whatever the outcome, the state the operation left behind (synced blocks,
+                // registered POI proofs, spent notes) is worth keeping: snapshots are always
+                // consistent, so a failed operation never saves a half-written one.
+                if let Some(session) = &self.session
+                    && let Err(e) = save_state(&session.db, &session.state, &session.db_name).await
+                {
+                    push_step(&self.shared, id, format!("state not saved: {e:#}"));
+                }
                 if let Ok(mut jobs) = self.shared.jobs.lock() {
                     jobs.update(id, |job| {
                         job.finished_at = Some(now_ms());
@@ -413,7 +412,8 @@ impl Actor {
             }
             Command::EmptyCache(reply) => {
                 // Queued behind any running job, like on the daemon: never deletes under a sync
-                // or a proof. Dropping the session releases the SDK's database handle.
+                // or a proof. The session goes without a last save: its in-memory state is
+                // exactly what the user asked to forget.
                 let result = match self.session.take() {
                     None => Err(anyhow!("open the wallet first: the cache is per wallet")),
                     Some(session) => {
@@ -442,6 +442,13 @@ impl Actor {
                 let _ = reply.send(result);
             }
             Command::Lock(reply) => {
+                // The state lives only in memory: save it before the session goes, else a sync
+                // interrupted by this lock, or one whose save failed, is done again next time.
+                if let Some(session) = &self.session
+                    && let Err(e) = save_state(&session.db, &session.state, &session.db_name).await
+                {
+                    tracing::warn!("state not saved at lock: {e:#}");
+                }
                 self.session = None;
                 if let Ok(mut s) = self.shared.status.write() {
                     *s = StatusSnapshot::default();
@@ -463,11 +470,9 @@ impl Actor {
         // (typically phones) cannot reach it directly from the browser. When the host serves a
         // same-origin /poi relay (Netlify `_redirects`, serve.py), prefer it — it reaches the POI
         // node over IPv4 server-side. Hosts without a relay (GitHub Pages) keep the direct URL.
-        if p.poi {
-            if let Some(relay) = poi_relay().await {
-                tracing::info!("POI through the same-origin relay {relay}");
-                chain.poi_endpoint = relay;
-            }
+        if p.poi && let Some(relay) = poi_relay().await {
+            tracing::info!("POI through the same-origin relay {relay}");
+            chain.poi_endpoint = relay;
         }
 
         let ledger_usb = p.ledger && p.ledger_transport.as_deref().unwrap_or("usb") == "usb";
@@ -640,11 +645,13 @@ impl Actor {
             bail!("RPC is on chain {rpc_chain}, expected {}", chain.id);
         }
 
-        // One IndexedDB database per account and chain, keyed by the master public key.
+        // One IndexedDB database per account and chain, keyed by the master public key. It holds
+        // the last snapshot of the SDK state, which the provider starts from.
         let master_key = signer.address().master_key().to_string();
         let tag = hex::encode(&Sha256::digest(master_key.as_bytes())[..8]);
         let name = format!("rgw-{}-{tag}", chain.id);
-        let db = JsKvStore::store(open_db(&name).unchecked_into());
+        let db = JsKvStore::new(open_db(&name).unchecked_into());
+        let state = load_state(&db, &name).await?;
         let eoa_ledger = if p.eoa_ledger {
             Some(LedgerEoa { index: p.index, address: ledger_eth })
         } else {
@@ -652,12 +659,15 @@ impl Actor {
         };
 
         let mut builder =
-            RailgunBuilder::new(chain.clone(), provider.clone()).with_database(db.clone());
+            RailgunBuilder::new(chain.clone(), provider.clone()).with_state(state.clone());
         if p.poi {
             builder = builder.with_poi();
         }
         let mut railgun = builder.build().await.context("building railgun provider")?;
         railgun.register(signer.clone()).await?;
+        // The registration is state too (the account's notes live under it): save it now, so
+        // a wallet locked before its first operation still starts from a snapshot of its own.
+        save_state(&db, &state, &name).await?;
 
         let bundler_url = p
             .bundler_url
@@ -725,6 +735,7 @@ impl Actor {
             ledger_usb,
             ledger_index: p.ledger.then_some(p.index),
             db,
+            state,
             signer,
             railgun,
             derivation,
@@ -735,7 +746,6 @@ impl Actor {
             bridge: (waku_mode == "browser").then(|| self.shared.bridge.clone()),
             silent_broadcasters: Vec::new(),
             monitor_alive,
-            learned_gas: LearnedGas::default(),
             note_tx: HashMap::new(),
         });
         Ok(())
@@ -760,15 +770,15 @@ impl Actor {
                     push_step(&shared, id, "note to the recipient encrypted with ML-KEM-768 + ECDH (post-quantum)".into());
                 }
                 let (asset, value, _) = resolve_amount(s, &asset, &amount).await?;
-                let builder = TransactionBuilder::new().transfer_with_encryption(
-                    s.signer.clone() as Arc<dyn RailgunSigner>,
+                let intents = AmountIntents::new().transfer_with_encryption(
+                    s.signer.clone(),
                     to,
                     asset,
                     value,
                     &memo,
                     encryption,
                 );
-                submit(s, &shared, id, builder, transport, Vec::new(), None, None, &fee_limits).await
+                submit(s, &shared, id, intents, transport, Vec::new(), None, None, &fee_limits).await
             }
             Op::Unshield { to, asset, amount, native, transport, fee_limits } => {
                 let to = Address::from_str(to.trim())
@@ -779,10 +789,10 @@ impl Actor {
     }
 
     async fn refresh_status(&mut self) {
-        if let Some(snap) = self.snapshot().await {
-            if let Ok(mut s) = self.shared.status.write() {
-                *s = snap;
-            }
+        if let Some(snap) = self.snapshot().await
+            && let Ok(mut s) = self.shared.status.write()
+        {
+            *s = snap;
         }
     }
 
@@ -790,7 +800,7 @@ impl Actor {
         let session = self.session.as_mut()?;
         let address = session.signer.address();
 
-        let entries = session.railgun.balance(address.clone()).await;
+        let entries = session.railgun.balance(address).await;
         let mut balances = Vec::new();
         for entry in entries {
             let mut view = json!({
@@ -811,7 +821,7 @@ impl Actor {
         }
         balances.sort_by_key(|v| v["asset"].as_str().map(str::to_owned));
 
-        let entries = session.railgun.notes(address.clone()).await;
+        let entries = session.railgun.notes(address).await;
         let positions: Vec<(u32, u32)> =
             entries.iter().map(|n| (n.tree_number, n.leaf_index)).collect();
         resolve_note_txs(session, &positions).await;
@@ -819,11 +829,11 @@ impl Actor {
         // cached per token by `token_meta`.
         let mut symbols: HashMap<Address, String> = HashMap::new();
         for n in &entries {
-            if let AssetId::Erc20(token) = n.asset {
-                if !symbols.contains_key(&token) {
-                    let (symbol, _) = token_meta(session, token).await;
-                    symbols.insert(token, symbol);
-                }
+            if let AssetId::Erc20(token) = n.asset
+                && let std::collections::hash_map::Entry::Vacant(entry) = symbols.entry(token)
+            {
+                let (symbol, _) = token_meta(session, token).await;
+                entry.insert(symbol);
             }
         }
         let notes = entries
@@ -998,6 +1008,46 @@ async fn resolve_amount(
     Ok((AssetId::Erc20(token), value, token))
 }
 
+/// Key of the SDK state snapshot in the wallet's IndexedDB database. One key, one value: the
+/// snapshot is written whole, so a save interrupted midway leaves the previous one in place.
+const STATE_KEY: &str = "railgun-state";
+
+/// The SDK state saved in `db`, or a fresh one when the database has none (a new wallet, or one
+/// written by a version that let the SDK persist its own entries: those are not read back, the
+/// chain is synced again). A snapshot that cannot be read is an error, not a silent resync: the
+/// message names the database so "Empty cache" can be used knowingly.
+async fn load_state(db: &JsKvStore, name: &str) -> Result<RailgunState> {
+    let Some(bytes) = db
+        .get(STATE_KEY)
+        .await
+        .map_err(|e| anyhow!("reading the saved state from IndexedDB database {name}: {e}"))?
+    else {
+        return Ok(RailgunState::default());
+    };
+    let snapshot: RailgunSnapshot = postcard::from_bytes(&bytes).with_context(|| {
+        format!(
+            "the saved state in IndexedDB database {name} is corrupt ({} bytes): empty the \
+             cache to sync again from scratch",
+            bytes.len()
+        )
+    })?;
+    RailgunState::from_snapshot(snapshot)
+        .with_context(|| format!("the saved state in IndexedDB database {name} cannot be restored"))
+}
+
+/// Saves a snapshot of `state` to `db` (`name` for the error message). Every call writes the
+/// whole state: the SDK only exposes complete checkpoints, so what is saved is consistent even
+/// when the operation that preceded it failed.
+async fn save_state(db: &JsKvStore, state: &RailgunState, name: &str) -> Result<()> {
+    let snapshot = state
+        .snapshot()
+        .map_err(|e| anyhow!("snapshot of the wallet state: {e}"))?;
+    let bytes = postcard::to_allocvec(&snapshot).context("encoding the wallet state")?;
+    db.put(STATE_KEY, &bytes)
+        .await
+        .map_err(|e| anyhow!("writing the state to IndexedDB database {name}: {e}"))
+}
+
 /// The public account when it lives on the Ledger's Ethereum app.
 struct LedgerEoa {
     index: u32,
@@ -1054,16 +1104,18 @@ impl LedgerKeys {
     }
 }
 
-fn ledger_cache() -> Store {
-    JsKvStore::store(open_db(LEDGER_CACHE_DB).unchecked_into())
+fn ledger_cache() -> JsKvStore {
+    JsKvStore::new(open_db(LEDGER_CACHE_DB).unchecked_into())
 }
 
-fn ledger_keys_key(index: u32) -> Vec<u8> {
-    format!("zknox:ledger-keys:{index}").into_bytes()
+/// The entry's key, hex-encoded as the store of earlier versions wrote every key: keys exported
+/// before this version are found under the same name.
+fn ledger_keys_key(index: u32) -> String {
+    hex::encode(format!("zknox:ledger-keys:{index}"))
 }
 
 async fn read_ledger_keys(index: u32) -> Option<LedgerKeys> {
-    let bytes = ledger_cache().get(ledger_keys_key(index)).await.ok().flatten()?;
+    let bytes = ledger_cache().get(&ledger_keys_key(index)).await.ok().flatten()?;
     serde_json::from_slice(&bytes).ok()
 }
 
@@ -1071,13 +1123,13 @@ async fn write_ledger_keys(index: u32, keys: &LedgerKeys) {
     let Ok(bytes) = serde_json::to_vec(keys) else {
         return;
     };
-    if let Err(e) = ledger_cache().put(ledger_keys_key(index), &bytes).await {
+    if let Err(e) = ledger_cache().put(&ledger_keys_key(index), &bytes).await {
         tracing::warn!("Ledger key cache not saved: {e}");
     }
 }
 
 async fn forget_ledger_keys(index: u32) {
-    let _ = ledger_cache().delete(ledger_keys_key(index)).await;
+    let _ = ledger_cache().delete(&ledger_keys_key(index)).await;
 }
 
 /// The Ethereum address of the Ledger account at `index`, read from the Ethereum app without
@@ -1228,21 +1280,21 @@ async fn eoa_signing(s: &mut Session, shared: &SharedRef, id: u64) -> Result<(Eo
         .await
         .map_err(|e| anyhow!("Ledger Ethereum app: {e}"))?;
     let address = Address::from_str(&address).map_err(|e| anyhow!("Ledger address: {e}"))?;
-    if let Some(prev) = previous {
-        if prev != address {
-            push_step(
-                shared,
-                id,
-                format!("the Ledger account is now {address} (was {prev}): another device or passphrase?"),
-            );
-        }
+    if let Some(prev) = previous
+        && prev != address
+    {
+        push_step(
+            shared,
+            id,
+            format!("the Ledger account is now {address} (was {prev}): another device or passphrase?"),
+        );
     }
     push_step(shared, id, format!("public account {address} ({path})"));
-    if let Some(mut keys) = read_ledger_keys(index).await {
-        if keys.eth_address(index) != Some(address) {
-            keys.eth = Some((address, path.clone()));
-            write_ledger_keys(index, &keys).await;
-        }
+    if let Some(mut keys) = read_ledger_keys(index).await
+        && keys.eth_address(index) != Some(address)
+    {
+        keys.eth = Some((address, path.clone()));
+        write_ledger_keys(index, &keys).await;
     }
     if let Some(l) = s.eoa_ledger.as_mut() {
         l.address = Some(address);
@@ -1466,11 +1518,11 @@ async fn unshield(
     fee_limits: &FeeLimits,
 ) -> Result<Value> {
     let (asset_id, value, token) = resolve_amount(s, asset, amount).await?;
-    let signer = s.signer.clone() as Arc<dyn RailgunSigner>;
+    let signer = s.signer.clone();
 
     if !native {
-        let builder = TransactionBuilder::new().unshield(signer, to, asset_id, value)?;
-        return submit(s, shared, id, builder, transport, Vec::new(), None, None, fee_limits).await;
+        let intents = AmountIntents::new().unshield(signer, to, asset_id, value)?;
+        return submit(s, shared, id, intents, transport, Vec::new(), None, None, fee_limits).await;
     }
 
     if token != s.chain.wrapped_base_token {
@@ -1478,13 +1530,13 @@ async fn unshield(
     }
     if transport != Transport::Erc4337 {
         // Legacy and direct: unshield to RelayAdapt, which unwraps and forwards natively in the
-        // same EVM transaction; the recipient is bound into the proofs through adaptParams.
+        // same EVM transaction; the recipient is bound into the proofs through adaptParams,
+        // which `submit` sets on the spends once they are known (after the broadcaster fee).
         let relay_adapt = s.chain.relay_adapt_contract;
         let mut action = RelayAction::unshield_base_token(relay_adapt, to, &mut rand::rng());
         action.require_success = transport == Transport::Direct;
-        let builder =
-            action.bind(TransactionBuilder::new().unshield(signer, relay_adapt, asset_id, value)?);
-        return submit(s, shared, id, builder, transport, Vec::new(), None, Some(action), fee_limits)
+        let intents = AmountIntents::new().unshield(signer, relay_adapt, asset_id, value)?;
+        return submit(s, shared, id, intents, transport, Vec::new(), None, Some(action), fee_limits)
             .await;
     }
 
@@ -1501,103 +1553,75 @@ async fn unshield(
         },
         Call { target: to, value: U256::from(received), data: Default::default() },
     ];
-    let builder = TransactionBuilder::new().unshield(signer, sender.address(), asset_id, value)?;
-    submit(s, shared, id, builder, transport, calls, Some(sender), None, fee_limits).await
+    let intents = AmountIntents::new().unshield(signer, sender.address(), asset_id, value)?;
+    submit(s, shared, id, intents, transport, calls, Some(sender), None, fee_limits).await
 }
 
-/// Proofs (hence Ledger signatures) allowed per operation on the single-proof path: the first,
-/// plus one re-proof per gas field the bundler finds too low after the fact.
-const SINGLE_PROOF_ATTEMPTS: usize = 3;
-
-/// Single-proof 4337 preparation that learns the bundler's requirements.
+/// Single-proof 4337 preparation: one proof, hence one spending signature.
 ///
-/// The fee is bound into the proof, so the gas limits must be fixed before proving. They come
-/// from our own simulation, but the bundler's estimate can exceed it (Pimlico pads verification
-/// by its own search ladder and multiplier: on 2026-10-07 it asked 220,825 for an account
-/// verification measured at ~10k). That estimate is only available once a proof exists. On a
-/// "limits too low" answer the bundler's figure is recorded and the operation re-proved with it;
-/// the figures are kept for the session, so later operations fix them up front and sign once.
+/// The fee is bound into the proof, so the gas limits must be fixed before proving. They are the
+/// bundler's own estimate of the dummy-proof operation, which the SDK has it simulate under a
+/// state override that makes the Railgun verifier accept the dummy proof at the cost of a real
+/// one. The limits are therefore the bundler's figures, not ours, and the real proof is checked
+/// against them before anything is sent.
 #[allow(clippy::too_many_arguments)]
-async fn prove_once_learning(
+async fn prove_once(
     s: &mut Session,
     shared: &SharedRef,
     id: u64,
-    builder: &TransactionBuilder,
+    spends: &[Spend],
     bundler: &PimlicoBundler,
     account: &SimpleSmartAccount,
     signer: Arc<dyn RailgunSigner>,
     fee_token: Address,
     calls: &Vec<Call>,
-    has_call: bool,
-    margin: u32,
-) -> Result<userop_kit::signable_user_operation::SignableUserOperation, RailgunProviderError> {
-    let (mut gas, _) = s
+) -> Result<SignableUserOperation, RailgunProviderError> {
+    let gas = s
         .railgun
         .simulate_gas_limits(
-            builder,
+            spends,
             bundler as &dyn Bundler,
             account,
             signer.clone(),
             fee_token,
             calls,
-            has_call,
-            margin,
             &mut rand::rng(),
         )
         .await?;
-
-    for attempt in 1..=SINGLE_PROOF_ATTEMPTS {
-        let l = s.learned_gas;
-        gas.pre_verification_gas = gas.pre_verification_gas.max(l.pre_verification);
-        gas.verification_gas_limit = gas.verification_gas_limit.max(l.verification);
-        gas.call_gas_limit = gas.call_gas_limit.max(l.call);
-        gas.paymaster_verification_gas_limit = Some(
-            gas.paymaster_verification_gas_limit
-                .unwrap_or(0)
-                .max(l.paymaster_verification),
-        );
-
-        match s
-            .railgun
-            .prepare_userop_single_proof(
-                builder.clone(),
-                bundler as &dyn Bundler,
-                account,
-                signer.clone(),
-                fee_token,
-                calls.clone(),
-                gas,
-                &mut rand::rng(),
-            )
-            .await
-        {
-            Ok((signable, _report)) => return Ok(signable),
-            Err(RailgunProviderError::LimitsTooLow { what, needed, limit })
-                if attempt < SINGLE_PROOF_ATTEMPTS =>
-            {
-                let learned = &mut s.learned_gas;
-                let slot = match what {
-                    "pre-verification" => &mut learned.pre_verification,
-                    "account verification" => &mut learned.verification,
-                    "call" => &mut learned.call,
-                    "paymaster verification" => &mut learned.paymaster_verification,
-                    _ => return Err(RailgunProviderError::LimitsTooLow { what, needed, limit }),
-                };
-                *slot = (*slot).max(needed);
-                push_step(
-                    shared,
-                    id,
-                    format!(
-                        "the bundler wants {needed} gas for {what} (limit was {limit}): nothing \
-                         was sent; proving again with it (one more signature), remembered for \
-                         the next operations of this session"
-                    ),
-                );
-            }
-            Err(e) => return Err(e),
-        }
-    }
-    unreachable!("the last attempt returns")
+    let total = gas.pre_verification_gas
+        + gas.verification_gas_limit
+        + gas.call_gas_limit
+        + gas.paymaster_verification_gas_limit.unwrap_or(0)
+        + gas.paymaster_post_op_gas_limit.unwrap_or(0);
+    push_step(
+        shared,
+        id,
+        format!(
+            "bundler estimate of the dummy-proof operation: pre-verification {}, account \
+             verification {}, call {}, paymaster verification {}, post-op {}; total {total} gas \
+             at {} wei/gas",
+            gas.pre_verification_gas,
+            gas.verification_gas_limit,
+            gas.call_gas_limit,
+            gas.paymaster_verification_gas_limit.unwrap_or(0),
+            gas.paymaster_post_op_gas_limit.unwrap_or(0),
+            gas.max_fee_per_gas,
+        ),
+    );
+    let (signable, _report) = s
+        .railgun
+        .prepare_userop_single_proof(
+            spends,
+            bundler as &dyn Bundler,
+            account,
+            signer,
+            fee_token,
+            calls.clone(),
+            gas,
+            &mut rand::rng(),
+        )
+        .await?;
+    Ok(signable)
 }
 
 /// Margin, in percent, added to the bundler's priority fee right before sending.
@@ -1612,7 +1636,7 @@ const PRIORITY_FEE_MARGIN_PERCENT: u128 = 10;
 /// price no longer fits under that cap.
 async fn refresh_priority_fee(
     bundler: &PimlicoBundler,
-    signable: &mut userop_kit::signable_user_operation::SignableUserOperation,
+    signable: &mut SignableUserOperation,
 ) -> Option<String> {
     let Ok(Some(price)) = (bundler as &dyn Bundler).gas_price().await else {
         return None;
@@ -1630,15 +1654,17 @@ async fn refresh_priority_fee(
     })
 }
 
-/// Proves and submits a private transaction over the selected transport. `relay` is the
-/// RelayAdapt action `builder` was bound to, if any: the proved transaction is then sent as
-/// `RelayAdapt.relay(...)`.
+/// Selects the notes for `intents`, then proves and submits the spends over the selected
+/// transport. `relay` is the RelayAdapt action to bind into the spends, if any: its adapt params
+/// cover the nullifiers of every spend of the batch, so it is bound once the batch is final (on
+/// the legacy transport, after the broadcaster fee is attached), and the proved transaction is
+/// then sent as `RelayAdapt.relay(...)`.
 #[allow(clippy::too_many_arguments)]
 async fn submit(
     s: &mut Session,
     shared: &SharedRef,
     id: u64,
-    builder: TransactionBuilder,
+    intents: AmountIntents,
     transport: Transport,
     calls: Vec<Call>,
     sender: Option<EoaSigner>,
@@ -1648,12 +1674,14 @@ async fn submit(
     if relay.is_some() && transport == Transport::Erc4337 {
         bail!("RelayAdapt actions are for the legacy and direct transports");
     }
-    let builder = if fee_limits.hybrid_change {
+    // The change note's encryption is decided at selection time, so it is set on the intents.
+    let intents = if fee_limits.hybrid_change {
         push_step(shared, id, "change notes encrypted with ML-KEM-768 + ECDH, to this wallet's key".into());
-        builder.with_hybrid_change()
+        intents.with_hybrid_change()
     } else {
-        builder
+        intents
     };
+    let spends = s.railgun.resolve_amounts(intents, &mut rand::rng()).await?;
     if s.ledger_usb {
         // The spending signature comes from the Railgun app: bring it to the front if another
         // app is open (the Ethereum app after a shield). The signer reconnects on its own.
@@ -1668,16 +1696,20 @@ async fn submit(
                      (RelayAction), not through a sender account"
                 );
             }
-            submit_legacy(s, shared, id, builder, relay.as_ref(), fee_limits).await?
+            submit_legacy(s, shared, id, spends, relay.as_ref(), fee_limits).await?
         }
         Transport::Direct => {
             if s.eoa.is_none() && s.eoa_ledger.is_none() {
                 bail!("direct transport needs a public account");
             }
             // Prove first: the spending signature comes from the Railgun app; only then is the
-            // Ethereum app needed, to send.
+            // Ethereum app needed, to send. The batch is final here: bind the relay action.
             push_step(shared, id, "building and proving (direct transport)".into());
-            let mut proved = s.railgun.build(builder, &mut rand::rng()).await?;
+            let spends = match &relay {
+                Some(action) => action.bind(spends),
+                None => spends,
+            };
+            let mut proved = s.railgun.prove(&spends, &mut rand::rng()).await?;
             if let Some(action) = &relay {
                 action.package(&mut proved);
             }
@@ -1711,35 +1743,29 @@ async fn submit(
                     .map_err(|e| anyhow!("invalid bundler url: {e}"))?,
             );
             let account = SimpleSmartAccount::new(sender.address(), s.chain.id, Arc::new(s.provider.clone()));
-            let railgun_signer = s.signer.clone() as Arc<dyn RailgunSigner>;
+            let railgun_signer = s.signer.clone();
             let fee_token = s.chain.wrapped_base_token;
-            let has_call = !calls.is_empty();
-            let margin = fee_limits
-                .gas_margin_percent
-                .unwrap_or(DEFAULT_GAS_MARGIN_PERCENT)
-                .min(MAX_GAS_MARGIN_PERCENT);
 
             let (mut signable, mode) = if fee_limits.single_proof {
                 push_step(
                     shared,
                     id,
                     format!(
-                        "proving once from ephemeral sender {} (gas simulated with {margin}% margin)",
+                        "proving once from ephemeral sender {}: gas limits from the bundler's \
+                         estimate of the dummy-proof operation",
                         sender.address()
                     ),
                 );
-                match prove_once_learning(
+                match prove_once(
                     s,
                     shared,
                     id,
-                    &builder,
+                    &spends,
                     &bundler,
                     &account,
                     railgun_signer.clone(),
                     fee_token,
                     &calls,
-                    has_call,
-                    margin,
                 )
                 .await
                 {
@@ -1755,14 +1781,15 @@ async fn submit(
                             shared,
                             id,
                             format!(
-                                "gas limits could not be simulated ({e:#}): falling back to the \
-                                 iterative estimate, which signs several times"
+                                "the bundler could not estimate the dummy-proof operation \
+                                 ({e:#}): falling back to the iterative estimate, which signs \
+                                 several times"
                             ),
                         );
                         let signable = s
                             .railgun
                             .prepare_userop(
-                                builder,
+                                &spends,
                                 &bundler as &dyn Bundler,
                                 &account,
                                 railgun_signer,
@@ -1787,7 +1814,7 @@ async fn submit(
                 let signable = s
                     .railgun
                     .prepare_userop(
-                        builder,
+                        &spends,
                         &bundler as &dyn Bundler,
                         &account,
                         railgun_signer,
@@ -1892,16 +1919,17 @@ fn format_rate(rate: u128) -> String {
     format!("{}.{:02}", hundredths / 100, hundredths % 100)
 }
 
-/// `eth_estimateGas` on a zero-proof build, from the verification-bypass origin (the Railgun
-/// verifier skips the SNARK check for it). With a gas price the node caps gas by the sender's
-/// balance, which may be empty: retried with a balance override.
+/// `eth_estimateGas` on a dummy-proof build of `spends` (already bound to `relay`, if any), from
+/// the verification-bypass origin (the Railgun verifier skips the SNARK check for it). With a
+/// gas price the node caps gas by the sender's balance, which may be empty: retried with a
+/// balance override.
 async fn estimate_with_dummy_proof(
     s: &mut Session,
-    builder: TransactionBuilder,
+    spends: &[Spend],
     gas_price: Option<u128>,
     relay: Option<&RelayAction>,
 ) -> Result<u64> {
-    let mut dummy = s.railgun.build_dummy(builder, &mut rand::rng()).await?;
+    let mut dummy = s.railgun.prove_dummy(spends, &mut rand::rng()).await?;
     if let Some(action) = relay {
         action.package(&mut dummy);
     }
@@ -1929,6 +1957,34 @@ async fn estimate_with_dummy_proof(
     }
 }
 
+/// The batch a broadcaster relays, from the spends of the operation itself: the fee note added
+/// first (the only commitment broadcasters look at), `minGasPrice` bound on every spend (the
+/// contract checks it per transaction), and last the RelayAdapt action, whose adapt params
+/// cover the nullifiers of the whole batch, fee spend included.
+async fn broadcaster_batch(
+    s: &mut Session,
+    spends: &[Spend],
+    broadcaster: RailgunAddress,
+    fee_asset: AssetId,
+    fee: u128,
+    gas_price: u128,
+    relay: Option<&RelayAction>,
+) -> Result<Vec<Spend>> {
+    let fee_payer = s.signer.clone();
+    let with_fee = s
+        .railgun
+        .attach_broadcaster_fee(spends, fee_payer, broadcaster, fee_asset, fee, &mut rand::rng())
+        .await?;
+    let priced: Vec<Spend> = with_fee
+        .into_iter()
+        .map(|spend| spend.min_gas_price(gas_price))
+        .collect();
+    Ok(match relay {
+        Some(action) => action.bind(priced),
+        None => priced,
+    })
+}
+
 /// Relays through a Railgun community broadcaster: quote, fee from a dummy-proof gas estimate,
 /// proof with the fee note pinned first and `minGasPrice` bound, pre-transaction POIs, sealed
 /// request over Waku. Port of the daemon's `submit_legacy`.
@@ -1936,7 +1992,7 @@ async fn submit_legacy(
     s: &mut Session,
     shared: &SharedRef,
     id: u64,
-    builder: TransactionBuilder,
+    spends: Vec<Spend>,
     relay: Option<&RelayAction>,
     fee_limits: &FeeLimits,
 ) -> Result<Value> {
@@ -2046,23 +2102,20 @@ async fn submit_legacy(
     // the slow market price: take the node's price plus 10%.
     let gas_price = s.provider.get_gas_price().await.context("eth_gasPrice")? * 11 / 10;
 
-    let signer = s.signer.clone() as Arc<dyn RailgunSigner>;
-    let with_fee = |fee: u128| -> Result<TransactionBuilder> {
-        Ok(builder
-            .clone()
-            .broadcaster_fee(signer.clone(), broadcaster_address.clone(), fee_asset, fee)?
-            .min_gas_price(gas_price))
-    };
     let fee_for = |gas: u64| {
         token_fee(quote.fee_per_unit_gas, gas, gas_price).ok_or_else(|| anyhow!("fee overflow"))
     };
 
     // The fee changes note values, possibly the number of inputs, hence the gas: estimate twice,
-    // the second time with a fee of the right magnitude.
+    // the second time with a fee of the right magnitude. Each round rebuilds the batch from the
+    // operation's own spends, with that round's fee.
     let mut fee = fee_for(FIRST_GUESS_GAS)?;
     let mut gas = 0;
     for round in 1..=2 {
-        gas = estimate_with_dummy_proof(s, with_fee(fee)?, Some(gas_price), relay)
+        let batch =
+            broadcaster_batch(s, &spends, broadcaster_address, fee_asset, fee, gas_price, relay)
+                .await?;
+        gas = estimate_with_dummy_proof(s, &batch, Some(gas_price), relay)
             .await
             .with_context(|| format!("dummy-proof gas estimate (round {round})"))?;
         fee = fee_for(gas)?;
@@ -2076,19 +2129,22 @@ async fn submit_legacy(
         ),
     );
 
-    if let Some(max_fee) = max_fee {
-        if fee > max_fee {
-            bail!(
-                "the broadcaster fee would be {} wrapped token, above your maximum of {}. \
-                 Nothing was proved or sent.",
-                trim_decimal(format_units(U256::from(fee), 18u8).unwrap_or_default()),
-                trim_decimal(format_units(U256::from(max_fee), 18u8).unwrap_or_default()),
-            );
-        }
+    if let Some(max_fee) = max_fee
+        && fee > max_fee
+    {
+        bail!(
+            "the broadcaster fee would be {} wrapped token, above your maximum of {}. \
+             Nothing was proved or sent.",
+            trim_decimal(format_units(U256::from(fee), 18u8).unwrap_or_default()),
+            trim_decimal(format_units(U256::from(max_fee), 18u8).unwrap_or_default()),
+        );
     }
 
     push_step(shared, id, "building and proving (legacy transport)".into());
-    let mut proved = s.railgun.build(with_fee(fee)?, &mut rand::rng()).await?;
+    let batch =
+        broadcaster_batch(s, &spends, broadcaster_address, fee_asset, fee, gas_price, relay)
+            .await?;
+    let mut proved = s.railgun.prove(&batch, &mut rand::rng()).await?;
     if let Some(action) = relay {
         action.package(&mut proved);
     }
@@ -2183,7 +2239,7 @@ async fn submit_legacy(
                     push_step(shared, id, format!("sync {attempt}/4 failed: {e}"));
                     continue;
                 }
-                let unspent = s.railgun.notes(address.clone()).await;
+                let unspent = s.railgun.notes(address).await;
                 let still_there = inputs
                     .iter()
                     .filter(|(t, l)| unspent.iter().any(|n| n.tree_number == *t && n.leaf_index == *l))

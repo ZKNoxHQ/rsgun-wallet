@@ -12,9 +12,10 @@ cargo run --release -p railgun-viewer            # http://127.0.0.1:8790
 cargo run --release -p railgun-viewer -- --port 8791 --data-dir ~/.railgun-viewer
 ```
 
-Data layout is the wallet's (`<data-dir>/<chain>/<sha256(address)[..8]>/db-v3.redb`), so
-`--data-dir ~/.railgun-wallet` reuses an already synced database. The wallet and the viewer cannot
-open the same directory at the same time: the database file is locked by the first one.
+Data layout is the wallet's (`<data-dir>/<chain>/<sha256(address)[..8]>/railgun-state.bin`, a
+snapshot of the SDK state written by the wallet's own store), so `--data-dir ~/.railgun-wallet`
+reuses an already synced state. Do not run the wallet and the viewer on the same directory at the
+same time: each saves its own snapshot after every operation and would overwrite the other's.
 
 ## Keys
 
