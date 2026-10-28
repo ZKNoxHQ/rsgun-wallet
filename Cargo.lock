@@ -1328,6 +1328,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "atomic-polyfill"
+version = "1.0.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8cf2bce30dfe09ef0bfaef228b9d414faaf7e563035494d7fe092dba54b300f4"
+dependencies = [
+ "critical-section",
+]
+
+[[package]]
 name = "atomic-waker"
 version = "1.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2048,6 +2057,15 @@ name = "cmov"
 version = "0.5.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0c9ea0ac24bc397ab3c98583a3c9ba74fa56b09a4449bbe172b9b1ddb016027a"
+
+[[package]]
+name = "cobs"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0fa961b519f0b462e3a3b4a34b64d119eeaca1d59af726fe450bbba07a9fc0a1"
+dependencies = [
+ "thiserror 2.0.21",
+]
 
 [[package]]
 name = "coins-ledger"
@@ -3080,6 +3098,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "embedded-io"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ef1a6892d9eef45c8fa6b9e0086428a2cca8491aca8f787c534a3d6d0bcb3ced"
+
+[[package]]
+name = "embedded-io"
+version = "0.6.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "edd0f118536f44f5ccd48bcb8b111bdc3de888b58c74639dfb034a357d0f206d"
+
+[[package]]
 name = "encoding_rs"
 version = "0.8.42"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3717,6 +3747,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "hash32"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b0c35f58762feb77d74ebe43bdbc3210f09be9fe6742234d573bacc26ed92b67"
+dependencies = [
+ "byteorder",
+]
+
+[[package]]
 name = "hashbrown"
 version = "0.12.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3832,6 +3871,20 @@ dependencies = [
  "serde",
  "serde_json",
  "uuid",
+]
+
+[[package]]
+name = "heapless"
+version = "0.7.17"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cdc6457c0eb62c71aac4bc17216026d8410337c4126773b9c5daba343f17964f"
+dependencies = [
+ "atomic-polyfill",
+ "hash32",
+ "rustc_version 0.4.1",
+ "serde",
+ "spin",
+ "stable_deref_trait",
 ]
 
 [[package]]
@@ -4744,9 +4797,8 @@ checksum = "a4933f3f57a8e9d9da04db23fb153356ecaf00cbd14aee46279c33dc80925c37"
 name = "kv-store-js"
 version = "0.1.0"
 dependencies = [
- "async-trait",
  "hex",
- "kohaku-kv-store",
+ "js-sys",
  "send_wrapper 0.6.0",
  "wasm-bindgen",
  "wasm-bindgen-futures",
@@ -6173,6 +6225,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "postcard"
+version = "1.1.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6764c3b5dd454e283a30e6dfe78e9b31096d9e32036b5d1eaac7a6119ccb9a24"
+dependencies = [
+ "cobs",
+ "embedded-io 0.4.0",
+ "embedded-io 0.6.1",
+ "heapless",
+ "serde",
+]
+
+[[package]]
 name = "potential_utf"
 version = "0.1.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6612,6 +6677,7 @@ dependencies = [
  "hex",
  "kohaku-crypto",
  "kohaku-railgun",
+ "postcard",
  "railgun-broadcaster",
  "railgun-chains",
  "railgun-wallet",
@@ -6644,9 +6710,9 @@ dependencies = [
  "hex",
  "hmac 0.12.1",
  "js-sys",
- "kohaku-kv-store",
  "kohaku-railgun",
  "kv-store-js",
+ "postcard",
  "railgun-broadcaster",
  "railgun-chains",
  "rand 0.10.3",
@@ -6676,9 +6742,9 @@ dependencies = [
  "hex",
  "hmac 0.12.1",
  "kohaku-eip-1193",
- "kohaku-kv-store",
  "kohaku-railgun",
  "kohaku-userop-kit",
+ "postcard",
  "railgun-broadcaster",
  "railgun-chains",
  "railgun-ledger",
@@ -6709,10 +6775,10 @@ dependencies = [
  "hmac 0.12.1",
  "js-sys",
  "kohaku-eip-1193",
- "kohaku-kv-store",
  "kohaku-railgun",
  "kohaku-userop-kit",
  "kv-store-js",
+ "postcard",
  "railgun-broadcaster",
  "railgun-chains",
  "railgun-ledger",
@@ -7950,6 +8016,15 @@ dependencies = [
  "log",
  "rand 0.8.8",
  "sha1",
+]
+
+[[package]]
+name = "spin"
+version = "0.9.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3763264f6b73151db08c50ff20d7d8a0b8796e021cdea7ceedad07b80155fa0e"
+dependencies = [
+ "lock_api",
 ]
 
 [[package]]
