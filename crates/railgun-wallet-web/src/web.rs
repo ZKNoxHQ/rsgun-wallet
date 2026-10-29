@@ -14,13 +14,13 @@ use std::{cell::RefCell, collections::HashMap, str::FromStr, sync::Arc};
 use alloy::{
     network::Ethereum,
     primitives::{Address, B256, U256, utils::format_units, utils::parse_units},
+    rpc::types::TransactionRequest,
     providers::{DynProvider, Provider, ProviderBuilder},
     signers::local::PrivateKeySigner as EoaSigner,
     sol,
     sol_types::SolCall,
 };
 use anyhow::{Context, Result, anyhow, bail};
-use eip_1193_provider::tx_data::TxData;
 use futures::{
     StreamExt,
     channel::{mpsc, oneshot},
@@ -1308,13 +1308,13 @@ async fn send_eoa(
     id: u64,
     signing: &EoaSigning,
     label: &str,
-    tx: TxData,
+    tx: TransactionRequest,
 ) -> Result<B256> {
     let pending = match signing {
         EoaSigning::Local => {
             push_step(shared, id, format!("sending {label} transaction from EOA"));
             s.provider
-                .send_transaction(tx.into())
+                .send_transaction(tx)
                 .await
                 .with_context(|| format!("{label}: eth_sendTransaction"))?
         }
@@ -1355,7 +1355,7 @@ async fn ledger_sign_tx(
     path: &str,
     from: Address,
     label: &str,
-    tx: TxData,
+    tx: TransactionRequest,
 ) -> Result<Vec<u8>> {
     use alloy::{
         consensus::{SignableTransaction, TxEip1559, TxEnvelope},
@@ -1374,11 +1374,9 @@ async fn ledger_sign_tx(
         .estimate_eip1559_fees()
         .await
         .context("fee estimate")?;
-    let request = alloy::rpc::types::TransactionRequest::default()
-        .from(from)
-        .to(tx.to)
-        .input(tx.data.clone().into())
-        .value(tx.value);
+    let (to, data, value) = railgun_broadcaster::relay_adapt::call_parts(&tx)
+        .ok_or_else(|| anyhow!("{label}: the transaction has no target"))?;
+    let request = tx.clone().from(from);
     let gas = s
         .provider
         .estimate_gas(request)
@@ -1390,10 +1388,10 @@ async fn ledger_sign_tx(
         gas_limit: gas + gas / 5,
         max_fee_per_gas: fees.max_fee_per_gas,
         max_priority_fee_per_gas: fees.max_priority_fee_per_gas,
-        to: TxKind::Call(tx.to),
-        value: tx.value,
+        to: TxKind::Call(to),
+        value,
         access_list: Default::default(),
-        input: tx.data,
+        input: data,
     };
     let mut payload = Vec::new();
     unsigned.encode_for_signing(&mut payload);
@@ -1484,13 +1482,10 @@ async fn shield_signed(
         }
         let allowance = erc20.allowance(eoa, spender).call().await?;
         if allowance < U256::from(value) {
-            let approve = TxData::new(
-                token,
-                ERC20::approveCall { spender, amount: U256::from(value) }
-                    .abi_encode()
-                    .into(),
-                U256::ZERO,
-            );
+            let approve = TransactionRequest::default()
+                .to(token)
+                .input(ERC20::approveCall { spender, amount: U256::from(value) }.abi_encode().into())
+                .value(U256::ZERO);
             hashes.push(send_eoa(s, shared, id, signing, "approve", approve).await?);
         }
         s.railgun
@@ -1933,7 +1928,7 @@ async fn estimate_with_dummy_proof(
     if let Some(action) = relay {
         action.package(&mut dummy);
     }
-    let mut request: alloy::rpc::types::TransactionRequest = dummy.tx_data.into();
+    let mut request = dummy.tx_data;
     request = request.from(railgun::provider::VERIFICATION_BYPASS);
     if let Some(gas_price) = gas_price {
         request = request.gas_price(gas_price);
@@ -2168,11 +2163,13 @@ async fn submit_legacy(
             "submitting through RelayAdapt.relay (unwrap and recipient bound in adaptParams)".into(),
         );
     }
+    let (to, calldata, _) = railgun_broadcaster::relay_adapt::call_parts(&proved.tx_data)
+        .ok_or_else(|| anyhow!("the proved transaction has no target"))?;
     let sealed = s.broadcaster.seal(
         BroadcastRequest {
             quote: quote.clone(),
-            to: proved.tx_data.to.to_checksum(None),
-            calldata: proved.tx_data.data.to_vec(),
+            to: to.to_checksum(None),
+            calldata: calldata.to_vec(),
             min_gas_price: gas_price,
             use_relay_adapt,
             pre_transaction_pois,

@@ -30,7 +30,6 @@ axum = { version = "0.8", default-features = false, features = ["http1", "json",
 base64 = "0.22"
 bip32 = { version = "0.5", default-features = false, features = ["secp256k1", "std"] }
 bip39 = { version = "2", default-features = false, features = ["std"] }
-eip-1193-provider = { workspace = true }
 hex = { workspace = true }
 hmac = "0.12"
 postcard = { workspace = true }

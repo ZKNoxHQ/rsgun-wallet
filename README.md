@@ -42,7 +42,7 @@ Cargo fetches it, nothing to clone. `Cargo.lock` pins the commit, so everyone bu
 SDK. To move to the head of the branch:
 
 ```sh
-cargo update -p kohaku-railgun -p kohaku-crypto -p kohaku-eip-1193 -p kohaku-userop-kit
+cargo update -p kohaku-railgun -p kohaku-crypto -p kohaku-userop-kit
 ```
 
 To work on the SDK and the wallet together, point the build at a local checkout with a
@@ -52,7 +52,6 @@ all the crates, so none is built twice:
 ```toml
 [patch."https://github.com/ZKNoxHQ/kohaku-rs"]
 kohaku-crypto = { path = "/path/to/kohaku-rs/crates/crypto" }
-kohaku-eip-1193 = { path = "/path/to/kohaku-rs/crates/eip-1193" }
 kohaku-railgun = { path = "/path/to/kohaku-rs/crates/railgun" }
 kohaku-userop-kit = { path = "/path/to/kohaku-rs/crates/userop-kit" }
 poseidon-rust = { path = "/path/to/kohaku-rs/crates/poseidon-rust" }

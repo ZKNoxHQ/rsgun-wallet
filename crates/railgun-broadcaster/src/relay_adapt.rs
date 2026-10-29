@@ -13,10 +13,10 @@
 
 use alloy::{
     primitives::{Address, B256, Bytes, FixedBytes, U256, keccak256},
+    rpc::types::TransactionRequest,
     sol,
     sol_types::{SolCall, SolValue},
 };
-use eip_1193_provider::tx_data::TxData;
 use railgun::transact::{ProvedTx, Spend};
 use rand::CryptoRng;
 
@@ -158,7 +158,17 @@ impl RelayAction {
             .map(|spend| spend.adapt(self.relay_adapt, params))
             .collect()
     }
+}
 
+/// The call a Railgun transaction request carries: target, calldata and value. The SDK sets
+/// the three on every request it builds; a request missing one is not a Railgun transaction.
+pub fn call_parts(tx: &TransactionRequest) -> Option<(Address, Bytes, U256)> {
+    let to = tx.to.and_then(|kind| kind.to().copied())?;
+    let data = tx.input.input().cloned().unwrap_or_default();
+    Some((to, data, tx.value.unwrap_or_default()))
+}
+
+impl RelayAction {
     /// Calldata of `RelayAdapt.relay(transactions, actionData)`.
     pub fn relay_calldata<T: SolValue>(&self, transactions: Vec<T>) -> Bytes {
         let mut data = RELAY_SELECTOR.to_vec();
@@ -174,7 +184,10 @@ impl RelayAction {
             .iter()
             .map(|op| op.transaction.clone())
             .collect();
-        proved.tx_data = TxData::new(self.relay_adapt, self.relay_calldata(transactions), U256::ZERO);
+        proved.tx_data = TransactionRequest::default()
+            .to(self.relay_adapt)
+            .input(self.relay_calldata(transactions).into())
+            .value(U256::ZERO);
     }
 }
 

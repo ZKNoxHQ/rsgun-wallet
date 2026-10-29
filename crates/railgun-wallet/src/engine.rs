@@ -17,13 +17,13 @@ use std::{
 use alloy::{
     network::Ethereum,
     primitives::{Address, B256, U256, utils::format_units, utils::parse_units},
+    rpc::types::TransactionRequest,
     providers::{DynProvider, Provider, ProviderBuilder},
     signers::local::PrivateKeySigner as EoaSigner,
     sol,
     sol_types::SolCall,
 };
 use anyhow::{Context, Result, anyhow, bail};
-use eip_1193_provider::tx_data::TxData;
 use railgun::{
     RailgunState,
     account::{
@@ -886,14 +886,14 @@ impl Session {
         meta
     }
 
-    async fn send_eoa(&self, ctx: &JobCtx<'_>, label: &str, tx: TxData) -> Result<B256> {
+    async fn send_eoa(&self, ctx: &JobCtx<'_>, label: &str, tx: TransactionRequest) -> Result<B256> {
         if self.eoa.is_none() {
             bail!("no public EOA key configured, cannot send {label} transaction");
         }
         ctx.step(format!("sending {label} transaction from EOA"));
         let pending = self
             .provider
-            .send_transaction(tx.into())
+            .send_transaction(tx)
             .await
             .with_context(|| format!("{label}: eth_sendTransaction"))?;
         let hash = *pending.tx_hash();
@@ -937,16 +937,17 @@ impl Session {
             }
             let allowance = erc20.allowance(eoa, spender).call().await?;
             if allowance < U256::from(value) {
-                let approve = TxData::new(
-                    token,
-                    ERC20::approveCall {
-                        spender,
-                        amount: U256::from(value),
-                    }
-                    .abi_encode()
-                    .into(),
-                    U256::ZERO,
-                );
+                let approve = TransactionRequest::default()
+                    .to(token)
+                    .input(
+                        ERC20::approveCall {
+                            spender,
+                            amount: U256::from(value),
+                        }
+                        .abi_encode()
+                        .into(),
+                    )
+                    .value(U256::ZERO);
                 hashes.push(self.send_eoa(ctx, "approve", approve).await?);
             }
             self.railgun
@@ -1392,11 +1393,13 @@ impl Session {
         if use_relay_adapt {
             ctx.step("submitting through RelayAdapt.relay (unwrap and recipient bound in adaptParams)");
         }
+        let (to, calldata, _) = railgun_broadcaster::relay_adapt::call_parts(&proved.tx_data)
+            .ok_or_else(|| anyhow!("the proved transaction has no target"))?;
         let sealed = self.broadcaster.seal(
             BroadcastRequest {
                 quote: quote.clone(),
-                to: proved.tx_data.to.to_checksum(None),
-                calldata: proved.tx_data.data.to_vec(),
+                to: to.to_checksum(None),
+                calldata: calldata.to_vec(),
                 min_gas_price: gas_price,
                 use_relay_adapt,
                 pre_transaction_pois,
@@ -1547,7 +1550,7 @@ impl Session {
         if let Some(action) = relay {
             action.package(&mut dummy);
         }
-        let mut request: alloy::rpc::types::TransactionRequest = dummy.tx_data.into();
+        let mut request = dummy.tx_data;
         request = request.from(railgun::provider::VERIFICATION_BYPASS);
         if let Some(gas_price) = gas_price {
             request = request.gas_price(gas_price);
