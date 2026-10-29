@@ -4663,7 +4663,7 @@ dependencies = [
 [[package]]
 name = "kohaku-crypto"
 version = "0.1.0"
-source = "git+https://github.com/ZKNoxHQ/kohaku-rs?branch=zknox%2Fdev-pq#44ee11f86a8fc08dc4c2fd7de792b615adbba720"
+source = "git+https://github.com/ZKNoxHQ/kohaku-rs?branch=zknox%2Fdev-pq#d90fd83a19005fc3fb140dffd02c5641dfc4b9e6"
 dependencies = [
  "ark-bn254",
  "ark-ff 0.6.0",
@@ -4676,25 +4676,9 @@ dependencies = [
 ]
 
 [[package]]
-name = "kohaku-eip-1193"
-version = "0.1.0"
-source = "git+https://github.com/ZKNoxHQ/kohaku-rs?branch=zknox%2Fdev-pq#44ee11f86a8fc08dc4c2fd7de792b615adbba720"
-dependencies = [
- "alloy",
- "async-trait",
- "cfg_aliases",
- "gloo-timers 0.3.0",
- "hex",
- "serde",
- "thiserror 2.0.21",
- "tokio",
- "web-time",
-]
-
-[[package]]
 name = "kohaku-merkle-tree"
 version = "0.1.0"
-source = "git+https://github.com/ZKNoxHQ/kohaku-rs?branch=zknox%2Fdev-pq#44ee11f86a8fc08dc4c2fd7de792b615adbba720"
+source = "git+https://github.com/ZKNoxHQ/kohaku-rs?branch=zknox%2Fdev-pq#d90fd83a19005fc3fb140dffd02c5641dfc4b9e6"
 dependencies = [
  "thiserror 2.0.21",
 ]
@@ -4702,7 +4686,7 @@ dependencies = [
 [[package]]
 name = "kohaku-railgun"
 version = "0.1.0"
-source = "git+https://github.com/ZKNoxHQ/kohaku-rs?branch=zknox%2Fdev-pq#44ee11f86a8fc08dc4c2fd7de792b615adbba720"
+source = "git+https://github.com/ZKNoxHQ/kohaku-rs?branch=zknox%2Fdev-pq#d90fd83a19005fc3fb140dffd02c5641dfc4b9e6"
 dependencies = [
  "aes",
  "aes-gcm",
@@ -4730,7 +4714,6 @@ dependencies = [
  "hex",
  "js-sys",
  "kohaku-crypto",
- "kohaku-eip-1193",
  "kohaku-merkle-tree",
  "kohaku-userop-kit",
  "libcrux-ml-kem",
@@ -4754,7 +4737,7 @@ dependencies = [
 [[package]]
 name = "kohaku-userop-kit"
 version = "0.1.0"
-source = "git+https://github.com/ZKNoxHQ/kohaku-rs?branch=zknox%2Fdev-pq#44ee11f86a8fc08dc4c2fd7de792b615adbba720"
+source = "git+https://github.com/ZKNoxHQ/kohaku-rs?branch=zknox%2Fdev-pq#d90fd83a19005fc3fb140dffd02c5641dfc4b9e6"
 dependencies = [
  "alloy",
  "alloy-sol-types",
@@ -6207,7 +6190,7 @@ dependencies = [
 [[package]]
 name = "poseidon-rust"
 version = "0.1.0"
-source = "git+https://github.com/ZKNoxHQ/kohaku-rs?branch=zknox%2Fdev-pq#44ee11f86a8fc08dc4c2fd7de792b615adbba720"
+source = "git+https://github.com/ZKNoxHQ/kohaku-rs?branch=zknox%2Fdev-pq#d90fd83a19005fc3fb140dffd02c5641dfc4b9e6"
 dependencies = [
  "ark-bn254",
  "ark-ff 0.6.0",
@@ -6604,7 +6587,6 @@ dependencies = [
  "hex",
  "js-sys",
  "kohaku-crypto",
- "kohaku-eip-1193",
  "kohaku-railgun",
  "railgun-broadcaster",
  "rand 0.10.3",
@@ -6736,7 +6718,6 @@ dependencies = [
  "bip39",
  "hex",
  "hmac 0.12.1",
- "kohaku-eip-1193",
  "kohaku-railgun",
  "kohaku-userop-kit",
  "postcard",
@@ -6769,7 +6750,6 @@ dependencies = [
  "hex",
  "hmac 0.12.1",
  "js-sys",
- "kohaku-eip-1193",
  "kohaku-railgun",
  "kohaku-userop-kit",
  "kv-store-js",
