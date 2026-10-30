@@ -4547,7 +4547,7 @@ dependencies = [
 [[package]]
 name = "kohaku-crypto"
 version = "0.1.0"
-source = "git+https://github.com/ZKNoxHQ/kohaku-rs?branch=zknox%2Fdev#ba4df85f91c5b25d21d367849a19a08265fdb47b"
+source = "git+https://github.com/ZKNoxHQ/kohaku-rs?branch=zknox%2Fdev#7043d3b00c657ecb5b9425b98ce1e3117a013d39"
 dependencies = [
  "ark-bn254",
  "ark-ff 0.6.0",
@@ -4562,7 +4562,7 @@ dependencies = [
 [[package]]
 name = "kohaku-merkle-tree"
 version = "0.1.0"
-source = "git+https://github.com/ZKNoxHQ/kohaku-rs?branch=zknox%2Fdev#ba4df85f91c5b25d21d367849a19a08265fdb47b"
+source = "git+https://github.com/ZKNoxHQ/kohaku-rs?branch=zknox%2Fdev#7043d3b00c657ecb5b9425b98ce1e3117a013d39"
 dependencies = [
  "thiserror 2.0.21",
 ]
@@ -4570,7 +4570,7 @@ dependencies = [
 [[package]]
 name = "kohaku-railgun"
 version = "0.1.0"
-source = "git+https://github.com/ZKNoxHQ/kohaku-rs?branch=zknox%2Fdev#ba4df85f91c5b25d21d367849a19a08265fdb47b"
+source = "git+https://github.com/ZKNoxHQ/kohaku-rs?branch=zknox%2Fdev#7043d3b00c657ecb5b9425b98ce1e3117a013d39"
 dependencies = [
  "aes",
  "aes-gcm",
@@ -4620,7 +4620,7 @@ dependencies = [
 [[package]]
 name = "kohaku-userop-kit"
 version = "0.1.0"
-source = "git+https://github.com/ZKNoxHQ/kohaku-rs?branch=zknox%2Fdev#ba4df85f91c5b25d21d367849a19a08265fdb47b"
+source = "git+https://github.com/ZKNoxHQ/kohaku-rs?branch=zknox%2Fdev#7043d3b00c657ecb5b9425b98ce1e3117a013d39"
 dependencies = [
  "alloy",
  "alloy-sol-types",
@@ -6002,7 +6002,7 @@ dependencies = [
 [[package]]
 name = "poseidon-rust"
 version = "0.1.0"
-source = "git+https://github.com/ZKNoxHQ/kohaku-rs?branch=zknox%2Fdev#ba4df85f91c5b25d21d367849a19a08265fdb47b"
+source = "git+https://github.com/ZKNoxHQ/kohaku-rs?branch=zknox%2Fdev#7043d3b00c657ecb5b9425b98ce1e3117a013d39"
 dependencies = [
  "ark-bn254",
  "ark-ff 0.6.0",
