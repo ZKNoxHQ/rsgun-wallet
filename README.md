@@ -52,6 +52,7 @@ all the crates, so none is built twice:
 ```toml
 [patch."https://github.com/ZKNoxHQ/kohaku-rs"]
 kohaku-crypto = { path = "/path/to/kohaku-rs/crates/crypto" }
+kohaku-merkle-tree = { path = "/path/to/kohaku-rs/crates/merkle-tree" }
 kohaku-railgun = { path = "/path/to/kohaku-rs/crates/railgun" }
 kohaku-userop-kit = { path = "/path/to/kohaku-rs/crates/userop-kit" }
 poseidon-rust = { path = "/path/to/kohaku-rs/crates/poseidon-rust" }
