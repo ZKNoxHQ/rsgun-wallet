@@ -1,7 +1,7 @@
 //! Credentials accepted by the viewer, shared by the native daemon and the web build.
 //!
 //! * a BIP-39 mnemonic: both keys are derived (`crate::wallet_keys`, the wallet's derivation file,
-//!   same schemes as the wallet);
+//!   the Railgun engine scheme, as the wallet);
 //! * a viewing private key with the 0zk address: view-only, the master public key is read from the
 //!   address (a bare viewing key is refused, ADR-016);
 //! * the legacy format of Railway and the community engine (shareable viewing key: hex of a
@@ -17,7 +17,7 @@ use railgun::{
 use serde::Deserialize;
 use serde_json::{Value, json};
 
-use crate::wallet_keys::{self, Derivation};
+use crate::wallet_keys;
 
 #[derive(Deserialize, Default, Clone)]
 #[serde(rename_all = "camelCase")]
@@ -25,8 +25,6 @@ pub struct Credentials {
     pub mnemonic: Option<String>,
     #[serde(default)]
     pub index: u32,
-    #[serde(default)]
-    pub derivation: Derivation,
     pub viewing_key: Option<String>,
     /// Legacy format (shareable viewing key), see [`parse_shareable`].
     #[serde(default)]
@@ -34,11 +32,7 @@ pub struct Credentials {
 }
 
 pub enum Resolved {
-    Full {
-        spending: SpendingKey,
-        viewing: ViewingKey,
-        scheme: &'static str,
-    },
+    Full { spending: SpendingKey, viewing: ViewingKey },
     /// Viewing key only: the master public key comes from the 0zk address or from the chain.
     ViewOnly { viewing: ViewingKey },
     /// Legacy format: viewing key and spending public key.
@@ -67,15 +61,8 @@ fn parse32(s: &str) -> Result<[u8; 32]> {
 
 pub fn resolve(c: &Credentials) -> Result<Resolved> {
     if let Some(m) = non_empty(&c.mnemonic) {
-        let keys = wallet_keys::derive(m, c.index, c.derivation)?;
-        return Ok(Resolved::Full {
-            spending: keys.spending,
-            viewing: keys.viewing,
-            scheme: match c.derivation {
-                Derivation::Railgun => "railgun",
-                Derivation::Kohaku => "kohaku",
-            },
-        });
+        let keys = wallet_keys::derive(m, c.index)?;
+        return Ok(Resolved::Full { spending: keys.spending, viewing: keys.viewing });
     }
     if let Some(s) = non_empty(&c.shareable_key) {
         let (viewing, spub) = parse_shareable(s)?;
@@ -275,8 +262,8 @@ pub fn master_from_address(address: &str, viewing: &ViewingKey) -> Result<Master
 
 /// `POST /api/derive`: viewing private key and 0zk address derived from a mnemonic, without
 /// touching the engine. Sepolia test seeds only, as the form says.
-pub fn derive_display(mnemonic: &str, derivation: Derivation, index: u32, chain_id: Option<u64>) -> Value {
-    match wallet_keys::derive(mnemonic.trim(), index, derivation) {
+pub fn derive_display(mnemonic: &str, index: u32, chain_id: Option<u64>) -> Value {
+    match wallet_keys::derive(mnemonic.trim(), index) {
         Ok(keys) => {
             let address = chain_id.map(|c| {
                 RailgunAddress::from_private_keys(keys.spending, keys.viewing, ChainId::evm(c)).to_string()

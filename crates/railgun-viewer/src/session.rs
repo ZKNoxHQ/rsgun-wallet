@@ -33,7 +33,6 @@ use crate::{
     keys::{self, Credentials, Resolved},
     shared::{SharedRef, log, now_ms},
     signer::{MasterSigner, SharedSigner},
-    wallet_keys::Derivation,
 };
 
 pub fn default_rpc_url(chain_id: u64) -> Option<&'static str> {
@@ -68,8 +67,6 @@ pub struct UnlockParams {
     pub mnemonic: Option<String>,
     #[serde(default)]
     pub index: u32,
-    #[serde(default)]
-    pub derivation: Derivation,
     #[serde(default, alias = "viewing_key", alias = "viewingPrivateKey", alias = "key")]
     pub viewing_key: Option<String>,
     /// 0zk address, optional with a bare viewing key: it carries the master public key, which
@@ -92,7 +89,6 @@ impl UnlockParams {
         Credentials {
             mnemonic: self.mnemonic.clone(),
             index: self.index,
-            derivation: self.derivation,
             viewing_key: self.viewing_key.clone(),
             shareable_key: self.shareable_key.clone(),
         }
@@ -156,7 +152,7 @@ pub async fn make_signer(
     shared: &SharedRef,
 ) -> Result<(Arc<dyn RailgunSigner>, &'static str)> {
     match resolved {
-        Resolved::Full { spending, viewing, scheme } => Ok((RgSigner::new_evm(spending, viewing, chain.id), scheme)),
+        Resolved::Full { spending, viewing } => Ok((RgSigner::new_evm(spending, viewing, chain.id), "phrase")),
         Resolved::Shared { viewing, spub } => {
             let signer = SharedSigner::new(viewing, spub, chain.id);
             if let Some(a) = address {

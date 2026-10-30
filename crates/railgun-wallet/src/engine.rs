@@ -55,7 +55,7 @@ use railgun_broadcaster::{
 
 use crate::{
     db,
-    keys::{self, Derivation},
+    keys,
     shared::{JobState, LegacyStatus, SharedRef, StatusSnapshot, TransportInfo, now_ms},
 };
 
@@ -232,8 +232,6 @@ pub struct UnlockParams {
     pub mnemonic: Option<String>,
     pub spending_key: Option<String>,
     pub viewing_key: Option<String>,
-    #[serde(default)]
-    pub derivation: Derivation,
     #[serde(default)]
     pub index: u32,
     pub chain_id: u64,
@@ -587,13 +585,9 @@ impl Engine {
                 (signer, None, "ledger")
             } else {
                 let (keys, derivation) = match (&p.mnemonic, &p.spending_key, &p.viewing_key) {
-                    (Some(m), _, _) if !m.trim().is_empty() => (
-                        keys::derive(m, p.index, p.derivation)?,
-                        match p.derivation {
-                            Derivation::Railgun => "railgun",
-                            Derivation::Kohaku => "kohaku",
-                        },
-                    ),
+                    (Some(m), _, _) if !m.trim().is_empty() => {
+                        (keys::derive(m, p.index)?, "phrase")
+                    }
                     (_, Some(s), Some(v)) => (keys::from_hex(s, v)?, "raw"),
                     _ => bail!(
                         "provide a mnemonic, both spending and viewing keys, or a Ledger device"

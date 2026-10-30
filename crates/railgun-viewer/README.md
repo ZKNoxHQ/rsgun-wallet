@@ -21,7 +21,7 @@ same time: each saves its own snapshot after every operation and would overwrite
 
 | Source | Mode | POI |
 |---|---|---|
-| BIP-39 mnemonic (railgun or kohaku derivation, index) | full: both keys derived, same as the wallet | statuses read, missing proofs rebuilt and submitted like the wallet does |
+| BIP-39 mnemonic (index) | full: both keys derived, same as the wallet | statuses read, missing proofs rebuilt and submitted like the wallet does |
 | private viewing key alone | view-only: the master public key is recovered on chain | statuses and txid tree only (`with_poi_read_only`) |
 
 Note public keys are `poseidon(masterKey, random)` and the master key is
@@ -64,5 +64,5 @@ blocks, `transactions` entity and unshield fields), POI node (`ppoi_validated_tx
 ## API (loopback)
 
 `GET /api/status`, `GET /api/snapshot`, `POST /api/unlock` (json: `chainId`, `rpcUrl`, `poi`,
-`syncNow`, and either `mnemonic`+`derivation`+`index`, or `viewingKey`+`address`, or
+`syncNow`, and either `mnemonic`+`index`, or `viewingKey`+`address`, or
 `shareableKey`), `POST /api/sync`, `POST /api/refresh`, `POST /api/lock`.

@@ -35,6 +35,9 @@ kohaku derives Railgun keys with standard secp256k1 BIP-32; the Railgun engine u
 hardened-only HMAC-SHA512 chain keyed with "babyjubjub seed". Same phrase, different 0zk
 address. Default is the Railgun scheme so existing Railway wallets open with their funds.
 
+Superseded (2026-10-30): kohaku moved to the Railgun scheme, so there is one derivation and the
+choice is gone.
+
 ## ADR-006: minimal fork surface in `crates/railgun`
 
 Only read-only accessors were added, grouped under a `ZKNOX fork` marker, to keep rebases on

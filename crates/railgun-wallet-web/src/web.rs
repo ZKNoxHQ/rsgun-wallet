@@ -55,7 +55,7 @@ use wasm_bindgen::{JsCast, JsValue, prelude::wasm_bindgen};
 use wasm_bindgen_futures::spawn_local;
 
 use crate::{
-    keys::{self, Derivation},
+    keys,
     shared::{self, JobState, LegacyStatus, SharedRef, StatusSnapshot, TransportInfo, now_ms},
 };
 
@@ -101,7 +101,6 @@ struct UnlockParams {
     mnemonic: Option<String>,
     spending_key: Option<String>,
     viewing_key: Option<String>,
-    derivation: Option<String>,
     index: u32,
     chain_id: u64,
     ledger: bool,
@@ -567,12 +566,7 @@ impl Actor {
             let (rgkeys, derivation): (keys::RailgunKeys, &'static str) =
                 match (&p.mnemonic, &p.spending_key, &p.viewing_key) {
                     (Some(m), _, _) if !m.trim().is_empty() => {
-                        let kohaku = p.derivation.as_deref() == Some("kohaku");
-                        let scheme = if kohaku { Derivation::Kohaku } else { Derivation::Railgun };
-                        (
-                            keys::derive(m, p.index, scheme)?,
-                            if kohaku { "kohaku" } else { "railgun" },
-                        )
+                        (keys::derive(m, p.index)?, "phrase")
                     }
                     (_, Some(s), Some(v)) => (keys::from_hex(s, v)?, "raw"),
                     _ => bail!(

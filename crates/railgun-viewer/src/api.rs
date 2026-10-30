@@ -134,8 +134,6 @@ async fn waku_exchange(State(st): State<AppState>, Json(body): Json<waku_link::E
 struct DeriveBody {
     mnemonic: String,
     #[serde(default)]
-    derivation: crate::wallet_keys::Derivation,
-    #[serde(default)]
     index: u32,
     #[serde(default)]
     chain_id: Option<u64>,
@@ -144,7 +142,7 @@ struct DeriveBody {
 /// Keys derived from a mnemonic, without touching the engine: the viewing private key (what the
 /// view-only mode takes) and the 0zk address. Sepolia test seeds only, as the form says.
 async fn derive(Json(b): Json<DeriveBody>) -> Json<Value> {
-    Json(crate::keys::derive_display(&b.mnemonic, b.derivation, b.index, b.chain_id))
+    Json(crate::keys::derive_display(&b.mnemonic, b.index, b.chain_id))
 }
 
 async fn health_get(State(st): State<AppState>) -> Json<Value> {
