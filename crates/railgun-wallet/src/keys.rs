@@ -1,12 +1,9 @@
 //! Key derivation from a BIP-39 mnemonic.
 //!
-//! Two schemes are supported because they yield different 0zk addresses for the same mnemonic:
-//!
-//! * [`Derivation::Railgun`]: Railgun engine scheme (`engine/src/key-derivation/bip32.ts`).
-//!   SLIP-0010-like, hardened-only, HMAC-SHA512 keyed with `"babyjubjub seed"`. This is what
-//!   Railway and every Railgun community wallet use.
-//! * [`Derivation::Kohaku`]: standard secp256k1 BIP-32 private key at the same paths, as done by
-//!   kohaku's `MnemonicKeystore` (`packages/plugins/src/host/mnemonic-keystore.ts`).
+//! Railgun keys follow the Railgun engine scheme (`engine/src/key-derivation/bip32.ts`):
+//! SLIP-0010-like, hardened-only, HMAC-SHA512 keyed with `"babyjubjub seed"`. Railway, every
+//! Railgun community wallet and kohaku use it. The Ethereum account of the same phrase is the
+//! standard secp256k1 BIP-32 derivation.
 
 use std::str::FromStr;
 
@@ -16,7 +13,6 @@ use railgun::{
     account::signer::{spending_key_path, viewing_key_path},
     crypto::keys::{HexKey, SpendingKey, ViewingKey},
 };
-use serde::{Deserialize, Serialize};
 use sha2::Sha512;
 
 type HmacSha512 = Hmac<Sha512>;
@@ -24,40 +20,20 @@ type HmacSha512 = Hmac<Sha512>;
 const RAILGUN_CURVE_SEED: &[u8] = b"babyjubjub seed";
 const HARDENED: u32 = 0x8000_0000;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
-#[serde(rename_all = "lowercase")]
-pub enum Derivation {
-    #[default]
-    Railgun,
-    Kohaku,
-}
-
 pub struct RailgunKeys {
     pub spending: SpendingKey,
     pub viewing: ViewingKey,
 }
 
 /// Derives the Railgun spending and viewing keys at `index` from a BIP-39 mnemonic.
-pub fn derive(mnemonic: &str, index: u32, scheme: Derivation) -> Result<RailgunKeys> {
+pub fn derive(mnemonic: &str, index: u32) -> Result<RailgunKeys> {
     let mnemonic = bip39::Mnemonic::parse_normalized(mnemonic.trim())
         .map_err(|e| anyhow!("invalid mnemonic: {e}"))?;
     let seed = mnemonic.to_seed("");
-
-    let spending_path = spending_key_path(index);
-    let viewing_path = viewing_key_path(index);
-
-    let (spending, viewing) = match scheme {
-        Derivation::Railgun => (
-            railgun_derive(&seed, &spending_path)?,
-            railgun_derive(&seed, &viewing_path)?,
-        ),
-        Derivation::Kohaku => (
-            bip32_derive(&seed, &spending_path)?,
-            bip32_derive(&seed, &viewing_path)?,
-        ),
-    };
-
-    keys_from_bytes(spending, viewing)
+    keys_from_bytes(
+        railgun_derive(&seed, &spending_key_path(index))?,
+        railgun_derive(&seed, &viewing_key_path(index))?,
+    )
 }
 
 /// Parses raw hex spending / viewing keys (32 bytes each, optional 0x prefix).
@@ -158,8 +134,8 @@ mod tests {
     /// Vector from the Railgun engine test-suite (chain-agnostic address of the hardhat mnemonic,
     /// index 0).
     #[test]
-    fn railgun_scheme_matches_engine_vector() {
-        let keys = derive(TEST_MNEMONIC, 0, Derivation::Railgun).unwrap();
+    fn matches_engine_vector() {
+        let keys = derive(TEST_MNEMONIC, 0).unwrap();
         let signer = PrivateKeySigner::new(keys.spending, keys.viewing, ChainId::All);
         assert_eq!(
             signer.address().to_string(),
@@ -170,9 +146,9 @@ mod tests {
     /// Accounts above 0, from `@railgun-community/engine` (`deriveNodes` then `encodeAddress`,
     /// chain-agnostic) on the hardhat mnemonic.
     #[test]
-    fn railgun_scheme_matches_engine_for_later_accounts() {
+    fn matches_engine_for_later_accounts() {
         let address = |index| {
-            let keys = derive(TEST_MNEMONIC, index, Derivation::Railgun).unwrap();
+            let keys = derive(TEST_MNEMONIC, index).unwrap();
             PrivateKeySigner::new(keys.spending, keys.viewing, ChainId::All)
                 .address()
                 .to_string()
@@ -203,12 +179,5 @@ mod tests {
         };
         assert_eq!(address(0), "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266");
         assert_eq!(address(1), "0x70997970C51812dc3A010C7d01b50e0d17dc79C8");
-    }
-
-    #[test]
-    fn schemes_differ() {
-        let a = derive(TEST_MNEMONIC, 0, Derivation::Railgun).unwrap();
-        let b = derive(TEST_MNEMONIC, 0, Derivation::Kohaku).unwrap();
-        assert_ne!(a.spending.to_hex(), b.spending.to_hex());
     }
 }

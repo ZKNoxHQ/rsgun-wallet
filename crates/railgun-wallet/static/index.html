@@ -177,13 +177,6 @@ if (new URLSearchParams(location.search).has("demo")) document.documentElement.c
     <p class="hint">Prefilled with the public test phrase (“yellow” twelve times). Anyone can spend from it: test networks only.</p>
     </div>
     <div class="row">
-      <div id="wrap-derivation" class="dev">
-        <label for="f-derivation">Key derivation</label>
-        <select id="f-derivation">
-          <option value="railgun">Railgun (same address as Railway)</option>
-          <option value="kohaku">kohaku (secp256k1 BIP-32)</option>
-        </select>
-      </div>
       <div>
         <label for="f-index">Account index</label>
         <input type="number" id="f-index" min="0" value="0">
@@ -359,7 +352,7 @@ const h = (tag, attrs, ...kids) => {
 };
 
 const state = { broadcaster: null, transportUsable: false, legacy: null, status: null, activeJob: null, transport: null, action: "shield", logSeq: 0, lastAutoSync: 0 };
-const PREFS = ["f-chain", "f-rpc", "f-derivation", "f-index", "f-bundler", "f-waku", "f-wakumode", "f-trusted"];
+const PREFS = ["f-chain", "f-rpc", "f-index", "f-bundler", "f-waku", "f-wakumode", "f-trusted"];
 const DEFAULTS = {
   "1": { rpc: "https://ethereum-rpc.publicnode.com", bundler: "https://public.pimlico.io/v2/1/rpc" },
   "11155111": { rpc: "https://ethereum-sepolia-rpc.publicnode.com", bundler: "https://public.pimlico.io/v2/11155111/rpc" },
@@ -690,7 +683,6 @@ function syncEoaLedgerField() {
 $("f-source").addEventListener("change", () => {
   const ledger = $("f-source").value.startsWith("ledger");
   $("wrap-phrase").hidden = ledger;
-  $("wrap-derivation").hidden = ledger;
   $("wrap-rawkeys").hidden = ledger;
   $("ledger-hint").hidden = !ledger;
   // A Ledger unlock signs public transactions with the same device (Ethereum app).
@@ -717,7 +709,7 @@ $("btn-unlock").addEventListener("click", async () => {
       mnemonic: ledger ? null : ($("f-mnemonic").value.trim() || null),
       spendingKey: ledger ? null : ($("f-spend").value.trim() || null),
       viewingKey: ledger ? null : ($("f-view").value.trim() || null),
-      derivation: $("f-derivation").value, index: Number($("f-index").value || 0),
+      index: Number($("f-index").value || 0),
       eoaKey: $("f-eoa").value.trim() || null, eoaLedger: $("f-eoa-ledger").checked, poi: $("f-poi").checked,
       bundlerUrl: $("f-bundler").value.trim() || null,
       wakuUrl: $("f-waku").value.trim() || null,

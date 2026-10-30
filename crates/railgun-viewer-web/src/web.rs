@@ -28,7 +28,6 @@ use crate::{
     session::{self, CacheStore, Caches, Session, UnlockParams},
     shared::{self, SharedRef, log, now_ms},
     waku_link,
-    wallet_keys::Derivation,
 };
 
 const VERSION: &str = concat!("web ", env!("CARGO_PKG_VERSION"));
@@ -306,8 +305,6 @@ impl Actor {
 struct DeriveBody {
     mnemonic: String,
     #[serde(default)]
-    derivation: Derivation,
-    #[serde(default)]
     index: u32,
     #[serde(default)]
     chain_id: Option<u64>,
@@ -380,7 +377,7 @@ async fn route(method: &str, path: &str, body: &str) -> Value {
             ok_or_error(rx.await.map_err(|_| anyhow!("engine dropped the request")))
         }
         ("POST", "/api/derive") => match parse::<DeriveBody>(body) {
-            Ok(b) => keys::derive_display(&b.mnemonic, b.derivation, b.index, b.chain_id),
+            Ok(b) => keys::derive_display(&b.mnemonic, b.index, b.chain_id),
             Err(e) => json!({ "ok": false, "error": format!("{e:#}") }),
         },
         (_, "/api/health") => {

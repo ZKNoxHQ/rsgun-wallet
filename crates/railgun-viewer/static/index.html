@@ -226,7 +226,7 @@
       <label>Options
         <span class="vw-opts">
           <label class="ck"><input type="checkbox" id="vwPoi" checked/> POI (statuses + txid tree)</label>
-          <label class="ck" id="vwDerivWrap">derivation <select id="vwDeriv"><option value="railgun">railgun</option><option value="kohaku">kohaku</option></select> index <input type="number" id="vwIndex" value="0" min="0" style="width:64px"/></label>
+          <label class="ck" id="vwIndexWrap">index <input type="number" id="vwIndex" value="0" min="0" style="width:64px"/></label>
         </span>
       </label>
     </div>
@@ -399,7 +399,7 @@ async function api(path,body){const r=await fetch(path,body?{method:"POST",heade
 
 function creds(){let mode=$("vwMode").value;const mn=$("vwMnemonic").value.trim(),vk=$("vwViewing").value.trim(),za=$("vwAddress").value.trim(),lg=$("vwLegacy").value.trim();
   const c={chainId:parseInt($("vwNet").value,10),rpcUrl:$("vwRpc").value.trim()||null,poi:$("vwPoi").checked,syncNow:true};
-  if(mode==="mnemonic"){if(c.chainId!==11155111)throw new Error("mnemonic input is Sepolia only");if(!mn)throw new Error("enter a mnemonic");c.mnemonic=mn;c.derivation=$("vwDeriv").value;c.index=parseInt($("vwIndex").value||"0",10);return c}
+  if(mode==="mnemonic"){if(c.chainId!==11155111)throw new Error("mnemonic input is Sepolia only");if(!mn)throw new Error("enter a mnemonic");c.mnemonic=mn;c.index=parseInt($("vwIndex").value||"0",10);return c}
   if(mode==="legacy"){if(!lg)throw new Error("paste the legacy key (hex starting with 82a5…)");c.shareableKey=lg;return c}
   if(!vk)throw new Error("enter the private viewing key");c.viewingKey=vk;
   if(!za)throw new Error('enter the 0zk address, or use the legacy format');if(!/^0zk1[qpzry9x8gf2tvdw0s3jn54khce6mua7l]+$/.test(za.toLowerCase()))throw new Error("the 0zk address looks malformed");c.address=za;
@@ -467,13 +467,13 @@ async function runHealth(){const chainId=parseInt($("vwNet").value,10);$("netRun
   const r=await api("/api/health/run",{chainId,rpcUrl:$("vwRpc").value.trim()||null,wakuUrl:$("netWaku").value.trim()||null,wakuSource:wakuSrc(),listenSecs:parseInt($("netListen").value||"15",10)});if(!r.ok){log("✗ health: "+r.error);$("netRun").disabled=false}else{$("netStatus").textContent="checking…"}}
 let deriveTimer=null;
 async function deriveFromMnemonic(){const m=$("vwMnemonic").value.trim();const box=$("vwDerived");if(!m||m.split(/\s+/).length<12){box.hidden=true;return}
-  try{const r=await api("/api/derive",{mnemonic:m,derivation:$("vwDeriv").value,index:parseInt($("vwIndex").value||"0",10),chainId:parseInt($("vwNet").value,10)});if(!r.ok){box.hidden=true;return}$("vwDerivedVk").textContent=r.viewingKey;$("vwDerivedAddr").textContent=r.address?"· "+r.address:"";box.hidden=false}catch(_){box.hidden=true}}
+  try{const r=await api("/api/derive",{mnemonic:m,index:parseInt($("vwIndex").value||"0",10),chainId:parseInt($("vwNet").value,10)});if(!r.ok){box.hidden=true;return}$("vwDerivedVk").textContent=r.viewingKey;$("vwDerivedAddr").textContent=r.address?"· "+r.address:"";box.hidden=false}catch(_){box.hidden=true}}
 function scheduleDerive(){clearTimeout(deriveTimer);deriveTimer=setTimeout(deriveFromMnemonic,400)}
 const KEY_HINT={"viewing+address":"The master public key is read from the 0zk address and checked against the viewing key (no scan)."};
-function syncKeySource(){const m=$("vwMode").value;document.querySelectorAll(".vw-key").forEach(d=>d.hidden=!d.dataset.mode.split(" ").includes(m));$("vwDerivWrap").style.display=m==="mnemonic"?"":"none";$("vwAddressLabel").hidden=m!=="viewing+address";$("vwKeyHint").textContent=KEY_HINT[m]||""}
+function syncKeySource(){const m=$("vwMode").value;document.querySelectorAll(".vw-key").forEach(d=>d.hidden=!d.dataset.mode.split(" ").includes(m));$("vwIndexWrap").style.display=m==="mnemonic"?"":"none";$("vwAddressLabel").hidden=m!=="viewing+address";$("vwKeyHint").textContent=KEY_HINT[m]||""}
 function syncMnemonicGate(){const sepolia=$("vwNet").value==="11155111";const m=$("vwMnemonic");m.disabled=!sepolia;m.closest(".vw-key").classList.toggle("gated",!sepolia);if(!sepolia){m.value="";const opt=$("vwMode").querySelector('option[value="mnemonic"]');opt.disabled=true;if($("vwMode").value==="mnemonic"){$("vwMode").value="viewing+address";$("vwMode").dispatchEvent(new Event("change"))}}else{$("vwMode").querySelector('option[value="mnemonic"]').disabled=false}}
 function bind(){document.querySelectorAll("#onglets button").forEach(b=>b.onclick=()=>show(b.dataset.view));$("netRun").onclick=runHealth;syncMnemonicGate();
-  ["vwMnemonic","vwDeriv","vwIndex"].forEach(id=>$(id).addEventListener("input",scheduleDerive));$("vwDeriv").addEventListener("change",scheduleDerive);
+  ["vwMnemonic","vwIndex"].forEach(id=>$(id).addEventListener("input",scheduleDerive));
   $("vwCopyVk").onclick=()=>{navigator.clipboard&&navigator.clipboard.writeText($("vwDerivedVk").textContent).then(()=>log("viewing key copied"))};
   $("vwNet").addEventListener("change",()=>{syncMnemonicGate();clearHealth();if(wakuSrc()==="tab"&&Waku.chainId!==null)Waku.ensure(parseInt($("vwNet").value,10))});
   const onWakuSrc=()=>{if(wakuSrc()!=="tab")Waku.stop();else if(S.view==="net")Waku.ensure(parseInt($("vwNet").value,10))};

@@ -27,10 +27,8 @@ Shielding is a public transaction and always goes out from the public EOA.
 
 ## Keys
 
-Two derivations from a BIP-39 phrase, because they give different 0zk addresses:
-
-* `railgun` (default): Railgun engine scheme, same address as Railway.
-* `kohaku`: secp256k1 BIP-32 at the same paths, as kohaku's `MnemonicKeystore` does.
+A BIP-39 phrase gives the Railgun keys by the Railgun engine scheme, the one Railway, the
+community wallets and kohaku use: same phrase, same 0zk address everywhere.
 
 Keys live in the daemon memory only. `<data-dir>/<chain>/<tag>/db-v3.redb` (directory mode 0700, `src/db.rs`) holds synced commitments,
 decrypted notes and pending POI entries (which include the nullifying key, see the upstream TODO
