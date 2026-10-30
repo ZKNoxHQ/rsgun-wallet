@@ -17,14 +17,13 @@ base64 = "0.22"
 bip32 = { version = "0.5", default-features = false, features = ["secp256k1", "std"] }
 bip39 = { version = "2", default-features = false, features = ["std"] }
 console_error_panic_hook = { workspace = true }
-eip-1193-provider = { workspace = true }
 futures = { workspace = true }
 gloo-timers = { workspace = true, features = ["futures"] }
 hex = { workspace = true }
 hmac = "0.12"
 js-sys = { workspace = true }
-kohaku-kv-store = { workspace = true }
 kv-store-js = { workspace = true }
+postcard = { workspace = true }
 railgun = { workspace = true }
 railgun-chains = { workspace = true }
 railgun-broadcaster = { path = "../railgun-broadcaster", features = ["light-node"] }

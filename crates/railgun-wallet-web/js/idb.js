@@ -1,6 +1,8 @@
 // IndexedDB storage for the web build, imported by the wasm module (wasm-bindgen snippet).
-// One IndexedDB database per account and chain ("rgw-<chain>-<tag>"), one object store "kv":
-// the SDK's keys (hex strings) as `kohaku_db::js::JsDatabase` expects. Values are strings.
+// One IndexedDB database per account and chain ("rgw-<chain>-<tag>"), one object store "kv",
+// as `kv_store_js::JsDatabase` expects: string keys, `Uint8Array` values. The wallet keeps the
+// SDK state snapshot under a single key; the Ledger key cache ("rgw-ledger") has one entry per
+// account. Entries written by earlier versions hold hex strings, which the Rust side still reads.
 const handles = new Map();
 
 function openIdb(name) {
@@ -43,13 +45,15 @@ export async function deleteDb(name) {
   });
 }
 
-// `kohaku_db::js::JsDatabase` interface.
+// `kv_store_js::JsDatabase` interface.
 export function openDb(name) {
   return {
     async get(key) {
       const v = await run(name, "readonly", (s) => s.get(key));
       return v === undefined ? null : v;
     },
+    // The value is stored as given: IndexedDB structured-clones a `Uint8Array`, so the bytes
+    // come back as a `Uint8Array` too. Nothing here turns it into a string.
     async set(key, value) { await run(name, "readwrite", (s) => s.put(value, key)); },
     async delete(key) { await run(name, "readwrite", (s) => s.delete(key)); },
   };

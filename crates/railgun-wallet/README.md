@@ -30,9 +30,10 @@ Shielding is a public transaction and always goes out from the public EOA.
 A BIP-39 phrase gives the Railgun keys by the Railgun engine scheme, the one Railway, the
 community wallets and kohaku use: same phrase, same 0zk address everywhere.
 
-Keys live in the daemon memory only. `<data-dir>/<chain>/<tag>/db-v3.redb` (directory mode 0700, `src/db.rs`) holds synced commitments,
-decrypted notes and pending POI entries (which include the nullifying key, see the upstream TODO
-in `poi/provider.rs`). `ephemeral_senders.jsonl` (mode 0600) keeps the key of any 7702 sender
+Keys live in the daemon memory only. `<data-dir>/<chain>/<tag>/railgun-state.bin` (directory mode
+0700, `src/db.rs`) is a snapshot of the SDK state, written atomically after every command: synced
+commitments, decrypted notes and pending POI entries (which include the nullifying key, see the
+upstream TODO in `poi/provider.rs`). `ephemeral_senders.jsonl` (mode 0600) keeps the key of any 7702 sender
 that funds transit through (native unshield), written before the UserOperation is sent.
 
 The 0zk address shown is the chain-agnostic form (`ChainId::All`), the same string Railway

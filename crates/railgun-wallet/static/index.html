@@ -264,11 +264,8 @@ if (new URLSearchParams(location.search).has("demo")) document.documentElement.c
           <div class="diag dev" id="transport-diag" hidden></div>
           <div id="aa-options" hidden>
             <label class="check"><input type="checkbox" id="aa-single"> Prove once (one signature per operation, for hardware and threshold signers)</label>
-            <div class="row" id="aa-margin-row" hidden>
-              <div><label for="aa-margin">Gas margin (%)</label><input type="number" id="aa-margin" min="0" max="200" value="12"></div>
-              <div><label class="check" style="margin-top:1.9rem"><input type="checkbox" id="aa-strict"> Never fall back to several signatures</label></div>
-            </div>
-            <p class="hint">By default the proof is regenerated until the fee matches the bundler's estimate within 1%, which asks the signer up to five times. Proving once measures the gas first: the exact transaction is simulated with a dummy proof, nothing is signed, and the limits are set from that plus this margin (12% by default: the paymaster validation needs about 8% more than the simulation sees it use). You pay the margin, nothing is refunded. The RPC must support state overrides in eth_call; if it does not, the wallet falls back to the default path unless the box above is ticked, in which case it stops before any signature. If the limits turn out too low after proving, the operation stops before anything is sent.</p>
+            <label class="check" id="aa-strict-row" hidden><input type="checkbox" id="aa-strict"> Never fall back to several signatures</label>
+            <p class="hint">By default the proof is regenerated until the fee matches the bundler's estimate within 1%, which asks the signer up to five times. Proving once asks the bundler for its estimate first: the exact operation is sent to it with a dummy proof and a state override under which the Railgun verifier accepts that proof, so nothing is signed and the limits are the bundler's own figures, with no margin added. The bundler must support state overrides in eth_estimateUserOperationGas; if it does not, the wallet falls back to the default path unless the box above is ticked, in which case it stops before any signature. If the limits turn out too low after proving, the operation stops before anything is sent.</p>
           </div>
           <div id="legacy-limits" hidden>
             <div class="row">
@@ -505,7 +502,7 @@ function timesGas(rate) { const h = BigInt(rate) * 100n / PAR; return `${h / 100
 function feeLimits() {
   return {
     maxFeeRate: $("l-rate").value.trim() || null, maxFee: $("l-maxfee").value.trim() || null,
-    singleProof: $("aa-single").checked, gasMarginPercent: Number($("aa-margin").value) || null,
+    singleProof: $("aa-single").checked,
     singleProofStrict: $("aa-strict").checked,
     broadcaster: state.broadcaster,
   };
@@ -515,7 +512,7 @@ function renderLegacy(s) {
   const box = $("legacy-box"); const l = state.legacy;
   $("legacy-limits").hidden = state.transport !== "legacy";
   $("aa-options").hidden = state.transport !== "erc4337";
-  $("aa-margin-row").hidden = !$("aa-single").checked;
+  $("aa-strict-row").hidden = !$("aa-single").checked;
   box.hidden = state.transport !== "legacy" || !l || !l.reachable;
   if (!l) return;
   const usable = legacyQuotes(s);
@@ -783,9 +780,10 @@ try { $("aa-single").checked = localStorage.getItem("rgw:aa-single") === "1"; } 
 try { $("aa-strict").checked = localStorage.getItem("rgw:aa-strict") === "1"; } catch {}
 $("aa-strict").addEventListener("change", () => { try { localStorage.setItem("rgw:aa-strict", $("aa-strict").checked ? "1" : "0"); } catch {} });
 $("aa-single").addEventListener("change", () => { try { localStorage.setItem("rgw:aa-single", $("aa-single").checked ? "1" : "0"); } catch {} render(); });
-// The margin default went from 25 to 12 in 0.10.1: a stored 25 is the old default, not a choice.
-try { if (localStorage.getItem("rgw:aa-margin") === "25" && !localStorage.getItem("rgw:aa-margin-v2")) localStorage.removeItem("rgw:aa-margin"); localStorage.setItem("rgw:aa-margin-v2", "1"); } catch {}
-for (const id of ["l-rate", "l-maxfee", "aa-margin"]) {
+// The gas margin of single-proof mode is gone (the limits are the bundler's own estimate): drop
+// what earlier versions stored for it.
+try { localStorage.removeItem("rgw:aa-margin"); localStorage.removeItem("rgw:aa-margin-v2"); } catch {}
+for (const id of ["l-rate", "l-maxfee"]) {
   try { const v = localStorage.getItem("rgw:" + id); if (v !== null && v !== "") $(id).value = v; } catch {}
   $(id).addEventListener("input", () => { try { localStorage.setItem("rgw:" + id, $(id).value); } catch {} render(); });
 }

@@ -2,14 +2,17 @@
 //! are not `Send`). Commands arrive over a channel; results land in `Shared`. The session logic
 //! itself lives in `session.rs`, shared with the web build.
 
-use std::path::PathBuf;
+use std::{
+    path::PathBuf,
+};
 
 use alloy::{
     network::Ethereum,
     providers::{Provider, ProviderBuilder},
 };
 use anyhow::{Context, Result, anyhow, bail};
-use railgun::builder::RailgunBuilder;
+use async_trait::async_trait;
+use railgun::{RailgunState, builder::RailgunBuilder};
 use railgun_wallet::db;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -19,7 +22,7 @@ use tracing::{error, info};
 pub use crate::session::UnlockParams;
 use crate::{
     keys,
-    session::{self, CacheStore, Caches, Session},
+    session::{self, Caches, Session, Store},
     shared::{SharedRef, log, now_ms},
 };
 
@@ -83,31 +86,54 @@ pub fn spawn(base_dir: PathBuf, shared: SharedRef) -> Engine {
     Engine { tx }
 }
 
-/// `<data-dir>/<chain>/<sha256(address)[..8]>/viewer-cache.json`.
-struct FileCache {
-    path: PathBuf,
+/// The account's directory, `<data-dir>/<chain>/<sha256(address)[..8]>/`, the wallet's layout:
+/// the SDK state in `railgun-state.bin` (the wallet's snapshot store, `railgun_wallet::db`, so
+/// the two read each other's state) and the viewer cache in `viewer-cache.json`. Earlier versions
+/// kept the SDK state in a redb database (`db-v3.redb`) in the same directory; that file is not
+/// read any more and is left alone.
+struct FileStore {
+    dir: PathBuf,
 }
 
-impl CacheStore for FileCache {
-    fn save(&self, value: Value) {
-        let res = self
-            .path
-            .parent()
-            .map(std::fs::create_dir_all)
-            .unwrap_or(Ok(()))
-            .and_then(|_| std::fs::write(&self.path, serde_json::to_vec(&value).unwrap_or_default()));
+impl FileStore {
+    /// Creates the directory (readable by the owner only: it holds decrypted notes) and restores
+    /// the saved SDK state, a fresh one when there is none yet. A snapshot that cannot be read is
+    /// an error naming the file rather than a silent resync from scratch.
+    fn open(dir: PathBuf) -> Result<(Self, RailgunState)> {
+        let state = db::open(&dir)?;
+        Ok((Self { dir }, state))
+    }
+
+    fn state_path(&self) -> PathBuf {
+        db::snapshot_path(&self.dir)
+    }
+
+    fn cache_path(&self) -> PathBuf {
+        self.dir.join("viewer-cache.json")
+    }
+
+    fn load_caches(&self) -> Caches {
+        std::fs::read(self.cache_path())
+            .ok()
+            .and_then(|b| serde_json::from_slice::<Value>(&b).ok())
+            .map(|v| Caches::from_value(&v))
+            .unwrap_or_default()
+    }
+}
+
+#[async_trait(?Send)]
+impl Store for FileStore {
+    fn save_cache(&self, value: Value) {
+        let res = std::fs::create_dir_all(&self.dir)
+            .and_then(|()| std::fs::write(self.cache_path(), serde_json::to_vec(&value).unwrap_or_default()));
         if let Err(e) = res {
             tracing::warn!("cannot write viewer cache: {e}");
         }
     }
-}
 
-fn load_caches(path: &PathBuf) -> Caches {
-    std::fs::read(path)
-        .ok()
-        .and_then(|b| serde_json::from_slice::<Value>(&b).ok())
-        .map(|v| Caches::from_value(&v))
-        .unwrap_or_default()
+    async fn save_state(&self, bytes: Vec<u8>) -> Result<()> {
+        db::save_bytes(&self.dir, &bytes)
+    }
 }
 
 struct Actor {
@@ -195,39 +221,30 @@ impl Actor {
             session::make_signer(resolved, keys::non_empty(&p.address), &chain, &self.shared).await?;
         let address = signer.address();
 
-        // Same layout as railgun-wallet: <data-dir>/<chain>/<sha256(address)[..8]>/db-v3.redb.
+        // Same layout as railgun-wallet: <data-dir>/<chain>/<sha256(address)[..8]>/.
         let tag = hex::encode(&Sha256::digest(address.to_string().as_bytes())[..8]);
         let data_dir = self.base_dir.join(chain.id.to_string()).join(tag);
-        let db = db::open(&data_dir)?;
+        let (store, state) = FileStore::open(data_dir)?;
 
-        let mut builder = RailgunBuilder::new(chain.clone(), provider.clone()).with_database(db);
+        let mut builder = RailgunBuilder::new(chain.clone(), provider.clone()).with_state(state.clone());
         if p.poi {
-            builder = if mode == "full" {
-                builder.with_poi()
-            } else {
-                builder.with_poi()
-            };
+            builder = builder.with_poi();
         }
         let mut railgun = builder.build().await.context("building railgun provider")?;
         railgun.register(signer.clone()).await?;
 
         let poi_endpoint = chain.poi_endpoint.clone();
-        let cache_path = data_dir.join("viewer-cache.json");
-        let caches = load_caches(&cache_path);
+        let caches = store.load_caches();
         info!(%address, chain = chain.id, mode, scheme, poi = p.poi, rpc = %rpc_url, "viewer unlocked");
         log(
             &self.shared,
             format!("✓ {mode} · {address} · chain {} · POI {}", chain.id, if p.poi { "on" } else { "off" }),
         );
-        self.session = Some(Session::new(
-            chain,
-            provider,
-            railgun,
-            signer,
-            mode,
-            Box::new(FileCache { path: cache_path }),
-            caches,
-        ));
+        let session = Session::new(chain, provider, railgun, state, signer, mode, Box::new(store), caches);
+        // Building and registering can already change the state (account registration, tree
+        // setup): save it so that the file exists from the first unlock.
+        session.persist_state().await?;
+        self.session = Some(session);
         if let Ok(mut s) = self.shared.lock() {
             s.unlocked = true;
             s.address = Some(address.to_string());
@@ -253,16 +270,21 @@ impl Actor {
         }
         log(&self.shared, "sync: scanning commitments, nullifiers and POI statuses…");
         let res = session::sync_with_progress(session, &self.shared).await;
+        let synced = session.railgun.synced_block();
+        // Whatever the outcome, the state has moved: save it (the progress up to a failure is
+        // kept too), and say so when it cannot be saved, since the next unlock would then start
+        // again from the last saved block.
+        let saved = session.persist_state().await;
         if let Ok(mut s) = self.shared.lock() {
             s.stage = None;
             s.stage_detail = None;
         }
         match res {
-            Ok(()) => log(
-                &self.shared,
-                format!("✓ synced to block {}", session.railgun.synced_block()),
-            ),
+            Ok(()) => log(&self.shared, format!("✓ synced to block {synced}")),
             Err(e) => self.set_error(format!("sync failed: {e:#}")),
+        }
+        if let Err(e) = saved {
+            self.set_error(format!("{e:#}"));
         }
         self.refresh_snapshot().await;
         if let Ok(mut s) = self.shared.lock() {
@@ -299,5 +321,34 @@ impl Actor {
             }
             Err(e) => self.set_error(format!("history: {e:#}")),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn state_file_round_trips_and_refuses_garbage() {
+        let dir = std::env::temp_dir().join(format!("railgun-viewer-state-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+
+        let (store, state) = FileStore::open(dir.clone()).unwrap();
+        assert!(!store.state_path().exists(), "no file before the first save");
+        let bytes = session::state_bytes(&state).unwrap();
+        store.save_state(bytes.clone()).await.unwrap();
+        assert_eq!(std::fs::read(store.state_path()).unwrap(), bytes);
+        assert!(!dir.join("railgun-state.bin.tmp").exists(), "the temporary file is renamed away");
+
+        let (_, restored) = FileStore::open(dir.clone()).unwrap();
+        assert_eq!(session::state_bytes(&restored).unwrap(), bytes);
+
+        std::fs::write(store.state_path(), [0xff; 7]).unwrap();
+        let Err(err) = FileStore::open(dir.clone()) else {
+            panic!("garbage opened as a Railgun state");
+        };
+        assert!(err.to_string().contains("railgun-state.bin"), "{err:#}");
+
+        std::fs::remove_dir_all(&dir).ok();
     }
 }

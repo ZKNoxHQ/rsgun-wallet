@@ -1,6 +1,6 @@
 //! The daemon's engine and HTTP routes, for the browser: one actor task (commands run in order,
 //! as on the daemon's engine thread), the same `/api/…` routes as `railgun-viewer/src/api.rs`,
-//! the SDK database and the viewer cache in IndexedDB.
+//! the SDK state snapshot and the viewer cache in IndexedDB.
 
 use std::{cell::RefCell, collections::HashMap, sync::Arc};
 
@@ -9,12 +9,13 @@ use alloy::{
     providers::{Provider, ProviderBuilder},
 };
 use anyhow::{Context, Result, anyhow, bail};
+use async_trait::async_trait;
 use futures::{
     StreamExt,
     channel::{mpsc, oneshot},
 };
 use kv_store_js::JsKvStore;
-use railgun::builder::RailgunBuilder;
+use railgun::{RailgunState, builder::RailgunBuilder};
 use railgun_broadcaster::{BroadcasterClient, BrowserBridge, WakuTransport};
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -25,7 +26,7 @@ use wasm_bindgen_futures::spawn_local;
 use crate::{
     health::{self, HealthParams},
     keys,
-    session::{self, CacheStore, Caches, Session, UnlockParams},
+    session::{self, Caches, STATE_KEY, Session, Store, UnlockParams},
     shared::{self, SharedRef, log, now_ms},
     waku_link,
 };
@@ -92,14 +93,54 @@ fn send(cmd: Command) -> Result<()> {
     })
 }
 
-/// IndexedDB copy of the viewer cache, written without waiting (the next sync rewrites it).
-struct IdbCache {
+/// The account's IndexedDB database (`drrail-<chain>-<tag>`, one object store): the SDK state
+/// under [`STATE_KEY`] as the bytes of a postcard snapshot, the viewer cache as a JSON string
+/// under the key `js/idb.js` reserves for it. Databases written by earlier versions still hold
+/// the SDK's old per-key entries (hex strings); they are not read and stay where they are.
+struct IdbStore {
     name: String,
+    db: JsKvStore,
 }
 
-impl CacheStore for IdbCache {
-    fn save(&self, value: Value) {
+impl IdbStore {
+    /// Opens (creates) the database and restores the saved SDK state, a fresh one when there is
+    /// none yet. A snapshot that cannot be read is an error naming the database.
+    async fn open(name: String) -> Result<(Self, RailgunState)> {
+        let db = JsKvStore::new(open_db(&name).unchecked_into());
+        let state = match db.get(STATE_KEY).await.map_err(|e| anyhow!("{e}"))? {
+            Some(bytes) => session::state_from_bytes(&bytes)
+                .with_context(|| format!("in IndexedDB {name}, key {STATE_KEY}"))?,
+            None => RailgunState::default(),
+        };
+        Ok((Self { name, db }, state))
+    }
+
+    async fn load_caches(&self) -> Caches {
+        match cache_load(&self.name).await {
+            Ok(v) => v
+                .as_string()
+                .and_then(|s| serde_json::from_str::<Value>(&s).ok())
+                .map(|v| Caches::from_value(&v))
+                .unwrap_or_default(),
+            Err(_) => Caches::default(),
+        }
+    }
+}
+
+#[async_trait(?Send)]
+impl Store for IdbStore {
+    /// Written without waiting: the next refresh rewrites it.
+    fn save_cache(&self, value: Value) {
         let _ = cache_save(&self.name, &value.to_string());
+    }
+
+    /// One `put` is one IndexedDB transaction: the previous value is replaced whole or not at
+    /// all. Awaited, so that a save failure is reported and the next one starts after it.
+    async fn save_state(&self, bytes: Vec<u8>) -> Result<()> {
+        self.db
+            .put(STATE_KEY, &bytes)
+            .await
+            .map_err(|e| anyhow!("IndexedDB {}: {e}", self.name))
     }
 }
 
@@ -190,28 +231,17 @@ impl Actor {
         // One IndexedDB database per chain and account, named like the daemon's data directory.
         let tag = hex::encode(&Sha256::digest(address.to_string().as_bytes())[..8]);
         let name = format!("drrail-{}-{tag}", chain.id);
-        let db = JsKvStore::store(open_db(&name).unchecked_into());
+        let (store, state) = IdbStore::open(name).await?;
 
-        let mut builder = RailgunBuilder::new(chain.clone(), provider.clone()).with_database(db);
+        let mut builder = RailgunBuilder::new(chain.clone(), provider.clone()).with_state(state.clone());
         if p.poi {
-            builder = if mode == "full" {
-                builder.with_poi()
-            } else {
-                builder.with_poi()
-            };
+            builder = builder.with_poi();
         }
         let mut railgun = builder.build().await.context("building railgun provider")?;
         railgun.register(signer.clone()).await?;
 
         let poi_endpoint = chain.poi_endpoint.clone();
-        let caches = match cache_load(&name).await {
-            Ok(v) => v
-                .as_string()
-                .and_then(|s| serde_json::from_str::<Value>(&s).ok())
-                .map(|v| Caches::from_value(&v))
-                .unwrap_or_default(),
-            Err(_) => Caches::default(),
-        };
+        let caches = store.load_caches().await;
         log(
             &self.shared,
             format!(
@@ -220,15 +250,11 @@ impl Actor {
                 if p.poi { "on" } else { "off" }
             ),
         );
-        self.session = Some(Session::new(
-            chain,
-            provider,
-            railgun,
-            signer,
-            mode,
-            Box::new(IdbCache { name }),
-            caches,
-        ));
+        let session = Session::new(chain, provider, railgun, state, signer, mode, Box::new(store), caches);
+        // Building and registering can already change the state (account registration, tree
+        // setup): save it so that the entry exists from the first unlock.
+        session.persist_state().await?;
+        self.session = Some(session);
         if let Ok(mut s) = self.shared.lock() {
             s.unlocked = true;
             s.address = Some(address.to_string());
@@ -254,13 +280,21 @@ impl Actor {
         }
         log(&self.shared, "sync: scanning commitments, nullifiers and POI statuses…");
         let res = session::sync_with_progress(session, &self.shared).await;
+        let synced = session.railgun.synced_block();
+        // Whatever the outcome, the state has moved: save it (the progress up to a failure is
+        // kept too), and say so when it cannot be saved, since the next unlock would then start
+        // again from the last saved block.
+        let saved = session.persist_state().await;
         if let Ok(mut s) = self.shared.lock() {
             s.stage = None;
             s.stage_detail = None;
         }
         match res {
-            Ok(()) => log(&self.shared, format!("✓ synced to block {}", session.railgun.synced_block())),
+            Ok(()) => log(&self.shared, format!("✓ synced to block {synced}")),
             Err(e) => self.set_error(format!("sync failed: {e:#}")),
+        }
+        if let Err(e) = saved {
+            self.set_error(format!("{e:#}"));
         }
         self.refresh_snapshot().await;
         if let Ok(mut s) = self.shared.lock() {

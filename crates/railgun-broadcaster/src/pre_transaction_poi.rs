@@ -76,16 +76,15 @@ pub async fn pre_transaction_pois(
 /// value). Broadcasters recompute this root from the leaf.
 pub fn dummy_txid_proof(leaf: TxidLeafHash) -> MerkleProof {
     let leaf = <U256 as From<TxidLeafHash>>::from(leaf);
-    let elements = vec![U256::ZERO; TREE_DEPTH];
-    let root = elements.iter().fold(leaf, |acc, sibling| {
-        ::crypto::poseidon_hash(&[acc, *sibling]).expect("poseidon on two field elements")
+    let root = (0..TREE_DEPTH).fold(leaf, |acc, _| {
+        ::crypto::poseidon_hash(&[acc, U256::ZERO]).expect("poseidon on two field elements")
     });
-    MerkleProof::new(leaf, elements, U256::ZERO, MerkleRoot::new(root))
+    MerkleProof::new(leaf, [[U256::ZERO; 2]; TREE_DEPTH], [0; TREE_DEPTH], root)
 }
 
 #[cfg(test)]
 mod tests {
-    use railgun::merkle_tree::MerkleTree;
+    use railgun::merkle_tree::{MerkleTree, proof_indices};
 
     use super::*;
 
@@ -94,14 +93,18 @@ mod tests {
         let leaf = TxidLeafHash::from(U256::from(1234u64));
         let proof = dummy_txid_proof(leaf);
 
-        assert_eq!(proof.elements.len(), TREE_DEPTH);
-        assert!(proof.elements.iter().all(|e| *e == U256::ZERO));
-        assert_eq!(proof.indices, U256::ZERO);
-        assert!(proof.verify());
+        assert_eq!(proof.leaf, U256::from(1234u64));
+        assert!(proof.siblings.iter().all(|row| *row == [U256::ZERO; 2]));
+        assert_eq!(proof.path, [0; TREE_DEPTH]);
+        assert_eq!(proof_indices(&proof), U256::ZERO);
+        let expected = (0..TREE_DEPTH).fold(proof.leaf, |acc, _| {
+            ::crypto::poseidon_hash(&[acc, U256::ZERO]).unwrap()
+        });
+        assert_eq!(proof.root, expected);
 
         // Not the root of a real tree holding the leaf: real trees pad with the zero value.
         let mut tree = MerkleTree::new(0);
-        tree.insert_leaves(&[U256::from(1234u64)], 0);
-        assert_ne!(proof.root, tree.root());
+        tree.insert_leaves(&[U256::from(1234u64)], 0).unwrap();
+        assert_ne!(MerkleRoot::new(proof.root), tree.root().unwrap());
     }
 }

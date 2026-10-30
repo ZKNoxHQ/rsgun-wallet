@@ -1,7 +1,7 @@
 //! ZKNOX Railgun viewer: read-only history and note lineage, from a mnemonic or a viewing key.
 //!
-//! Companion of `railgun-wallet`: same SDK, same key derivation, same on-disk database format,
-//! but it never holds a spending key unless a mnemonic is given, and it never spends.
+//! Companion of `railgun-wallet`: same SDK, same key derivation, same data directory layout, but
+//! it never holds a spending key unless a mnemonic is given, and it never spends.
 
 use std::{net::SocketAddr, path::PathBuf, sync::Arc};
 
@@ -42,8 +42,9 @@ fn parse_args() -> Result<Args> {
             "-h" | "--help" => {
                 println!(
                     "railgun-viewer [--port 8790] [--data-dir ~/.railgun-viewer]\n\n\
-                     Pass --data-dir ~/.railgun-wallet to reuse the wallet's synced database \
-                     (same address, same layout); do not run both at the same time on it."
+                     Pass --data-dir ~/.railgun-wallet to reuse the wallet's synced state \
+                     (same address, same layout); do not run both at the same time on it, \
+                     each would overwrite the other's saved state."
                 );
                 std::process::exit(0);
             }
