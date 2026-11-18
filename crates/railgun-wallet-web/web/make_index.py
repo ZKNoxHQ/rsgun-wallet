@@ -31,6 +31,9 @@ must("reads its Ethereum address and switches back.\")",
      "reads its Ethereum address and switches back. Once this browser has opened the account, "
      "it asks nothing.\")")
 
+# the static site is Sepolia only: no mainnet in the network list (the engine refuses it too)
+must('\n          <option value="1">Ethereum mainnet</option>', "")
+
 # where the engine runs, at the bottom of the page
 # hidden in demo mode, like the other blocks marked "dev"
 note = ('<div class="dev" style="margin:18px auto 12px;max-width:1280px;text-align:center;font-size:12px;opacity:.65">'
