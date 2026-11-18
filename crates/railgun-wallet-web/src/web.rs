@@ -84,6 +84,8 @@ const DEFAULT_MAX_FEE_RATE: &str = "1.5";
 const BROADCASTER_DRAW_PERCENT: u32 = 10;
 const SILENT_BROADCASTER_PENALTY_MS: u64 = 600_000;
 const FIRST_GUESS_GAS: u64 = 700_000;
+/// The only chain this site opens.
+const SEPOLIA_CHAIN_ID: u64 = 11_155_111;
 
 #[wasm_bindgen(module = "/js/idb.js")]
 extern "C" {
@@ -462,6 +464,10 @@ impl Actor {
     }
 
     async fn unlock(&mut self, p: UnlockParams) -> Result<()> {
+        // This site is a Sepolia test wallet: mainnet is refused even through the API.
+        if p.chain_id != SEPOLIA_CHAIN_ID {
+            bail!("this site only opens Sepolia wallets (chain {SEPOLIA_CHAIN_ID})");
+        }
         let mut chain = railgun_chains::from_chain_id(p.chain_id)
             .ok_or_else(|| anyhow!("unsupported chain id {}", p.chain_id))?;
 

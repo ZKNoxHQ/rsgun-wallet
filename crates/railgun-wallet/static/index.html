@@ -390,7 +390,11 @@ function banner(msg) {
 
 function loadPrefs() {
   for (const id of PREFS) {
-    try { const v = localStorage.getItem("rgw:" + id); if (v !== null) $(id).value = v; } catch {}
+    // A saved choice the list no longer offers (mainnet on the static site) keeps the default.
+    try {
+      const v = localStorage.getItem("rgw:" + id), el = $(id);
+      if (v !== null && (el.tagName !== "SELECT" || [...el.options].some((o) => o.value === v))) el.value = v;
+    } catch {}
   }
   try { const p = localStorage.getItem("rgw:f-poi"); if (p !== null) $("f-poi").checked = p === "1"; } catch {}
   try { $("f-eoa-ledger").checked = localStorage.getItem("rgw:f-eoa-ledger") === "1"; } catch {}
